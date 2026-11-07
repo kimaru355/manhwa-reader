@@ -4,7 +4,6 @@ import { useEffect, useState } from 'react';
 
 import { ensureLocal } from './pdfCache';
 import type { Manhwa } from './types';
-import { hash } from './util';
 
 const dir = `${FS.documentDirectory}covers/`;
 const memo = new Map<string, string | null>();
@@ -12,7 +11,7 @@ const pending = new Map<string, Promise<string | null>>();
 let queue: Promise<unknown> = Promise.resolve();
 
 async function render(m: Manhwa): Promise<string | null> {
-  const dest = `${dir}${hash(m.id)}.jpg`;
+  const dest = `${dir}${m.id}.jpg`;
   const info = await FS.getInfoAsync(dest);
   if (info.exists) return dest;
 

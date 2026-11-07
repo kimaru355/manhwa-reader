@@ -30,7 +30,8 @@ export default function TabsLayout() {
     >
       <Tabs.Screen name="index" options={tab('Home', 'home', 'home-outline')} />
       <Tabs.Screen name="favorites" options={tab('Favorites', 'heart', 'heart-outline')} />
-      <Tabs.Screen name="recent" options={tab('Recent', 'time', 'time-outline')} />
+      <Tabs.Screen name="wishlist" options={tab('Wishlist', 'star', 'star-outline')} />
+      <Tabs.Screen name="recent"options={tab('Recent', 'time', 'time-outline')} />
       <Tabs.Screen name="settings" options={tab('Settings', 'settings', 'settings-outline')} />
     </Tabs>
   );

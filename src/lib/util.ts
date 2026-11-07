@@ -2,6 +2,7 @@ const collator = new Intl.Collator(undefined, { numeric: true, sensitivity: 'bas
 
 export const naturalCompare = (a: string, b: string) => collator.compare(a, b);
 
+/** Short stable key for a string; safe to use in route params and file names. */
 export function hash(s: string): string {
   let a = 5381;
   let b = 52711;
@@ -15,7 +16,7 @@ export function hash(s: string): string {
 
 /**
  * SAF URIs carry the path inside the document id, e.g.
- * content://…/tree/primary%3AHDoujin/document/primary%3AHDoujin%2FSeries%2F001.pdf
+ * content://…/tree/primary%3Amanhwa/document/primary%3Amanhwa%2FSeries%2F001.pdf
  */
 export function nameFromUri(uri: string): string {
   let s = uri;

@@ -10,40 +10,31 @@ Android app (React Native / Expo) for reading PDF manhwa from folders you choose
 
 ## Folder layout
 
-A manhwa is a folder that directly contains one PDF per chapter. When you add a folder, it and its
-immediate subfolders are scanned:
+A manhwa is a folder that directly contains one PDF per chapter. The folders directly inside a folder you add are scanned:
 
 ```
-Manga/                      <- folder you add in Settings
+manhwa/                     <- folder you add in Settings
   Panty Note - chapters/    -> "Panty Note" (the " - chapters" suffix is dropped)
     001 - Chapter 1.pdf
     002 - Chapter 2.pdf
   Some Series/
     ch1.pdf
-  Complete Book.pdf         -> single-chapter manhwa (skipped if a folder with the same title exists)
+  Merged Book.pdf           -> ignored
 ```
 
-Chapters are sorted naturally (`2` before `10`). Folders without PDFs (e.g. image folders) are ignored.
+If none of the subfolders hold PDFs, the folder you added is itself treated as one manhwa. Chapters are sorted naturally (`2` before `10`).
 
 ## Build an APK
 
 Native modules (PDF rendering, thumbnails) mean this can't run in Expo Go.
 
-**Cloud (no Android Studio needed):**
+**Android Studio:** open the `android` folder, let Gradle sync, set the Build Variant to `release`, then Build > Build APK(s).
 
-```bash
-npm install
-npx eas-cli@latest login
-npx eas-cli@latest build --platform android --profile preview
-```
-
-This produces an installable `.apk`.
-
-**Local:** install JDK 17 and Android Studio (SDK + `ANDROID_HOME`), then `npx expo run:android`.
+**Command line:** `npx expo run:android --variant release` (needs `JAVA_HOME` and `ANDROID_HOME`).
 
 ## Notes
 
-- PDFs are copied into app cache one chapter at a time (the next one is prefetched), because
-  `react-native-pdf` cannot open `content://` URIs from the folder picker directly. Cache is capped at 8 chapters.
-- Covers are the first page of the first chapter, rendered once and stored in app storage.
+- Each chapter is copied into app cache and opened from there (the next one is prefetched; cache is capped at 8 chapters).
+- Covers are page 1 of the first chapter, rendered once and stored in app storage.
 - Folder access uses Android's Storage Access Framework, so no storage permission prompt is needed.
+- `patches/` holds a `react-native-pdf` patch applied on `npm install`. It only affects `content://` paths, which the app no longer uses.

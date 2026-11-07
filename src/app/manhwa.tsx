@@ -8,6 +8,7 @@ import { Cover } from '../components/Cover';
 import { EmptyState } from '../components/EmptyState';
 import { useLibrary } from '../lib/library';
 import { useTheme } from '../lib/theme';
+import type { Bookmark } from '../lib/types';
 
 const openReader = (id: string, chapter: number, page = 1) =>
   router.push({ pathname: '/reader', params: { id, ch: String(chapter), page: String(page) } });
@@ -16,7 +17,8 @@ export default function ManhwaDetail() {
   const t = useTheme();
   const insets = useSafeAreaInsets();
   const { id } = useLocalSearchParams<{ id: string }>();
-  const { getManhwa, getProgress, isFavorite, toggleFavorite } = useLibrary();
+  const { getManhwa, getProgress, isFavorite, toggleFavorite, isWishlisted, toggleWishlist, getBookmarks } =
+    useLibrary();
   const [newestFirst, setNewestFirst] = useState(false);
 
   const m = getManhwa(id);
@@ -30,6 +32,9 @@ export default function ManhwaDetail() {
 
   const progress = getProgress(m.id);
   const fav = isFavorite(m.id);
+  const wished = isWishlisted(m.id);
+  const marksByChapter = new Map<string, Bookmark[]>();
+  for (const b of getBookmarks(m.id)) marksByChapter.set(b.chapterUri, [...(marksByChapter.get(b.chapterUri) ?? []), b]);
   const indexed = m.chapters.map((c, i) => ({ c, i }));
   const rows = newestFirst ? [...indexed].reverse() : indexed;
   const resume = progress && m.chapters[progress.chapterIndex] ? progress : null;
@@ -43,7 +48,10 @@ export default function ManhwaDetail() {
         <Text numberOfLines={1} style={[styles.barTitle, { color: t.text }]}>
           {m.title}
         </Text>
-        <Pressable hitSlop={12} onPress={() => toggleFavorite(m.id)}>
+        <Pressable hitSlop={10} onPress={() => toggleWishlist(m.id)}>
+          <Ionicons name={wished ? 'star' : 'star-outline'} size={26} color={wished ? t.accent : t.text} />
+        </Pressable>
+        <Pressable hitSlop={10} onPress={() => toggleFavorite(m.id)}>
           <Ionicons name={fav ? 'heart' : 'heart-outline'} size={26} color={fav ? t.accent : t.text} />
         </Pressable>
       </View>
@@ -73,7 +81,7 @@ export default function ManhwaDetail() {
               onPress={() => (resume ? openReader(m.id, resume.chapterIndex, resume.page) : openReader(m.id, 0))}
             >
               <Ionicons name="book" size={18} color="#fff" />
-              <Text style={styles.ctaText}>
+              <Text style={styles.ctaText} numberOfLines={1}>
                 {resume ? `Continue · ${m.chapters[resume.chapterIndex].name}` : 'Start reading'}
               </Text>
             </Pressable>
@@ -89,14 +97,24 @@ export default function ManhwaDetail() {
         renderItem={({ item: { c, i } }) => {
           const current = resume?.chapterIndex === i;
           const read = !!resume && i < resume.chapterIndex;
+          const marks = marksByChapter.get(c.uri) ?? [];
+          const notes = marks.map((b) => b.note).filter(Boolean).join(' · ');
           return (
             <Pressable
               style={[styles.chapter, { borderBottomColor: t.border }]}
               onPress={() => openReader(m.id, i, current ? resume!.page : 1)}
             >
-              <Text numberOfLines={1} style={[styles.chapterName, { color: read ? t.sub : t.text }]}>
-                {c.name}
-              </Text>
+              <View style={styles.chapterText}>
+                <Text numberOfLines={1} style={[styles.chapterName, { color: read ? t.sub : t.text }]}>
+                  {c.name}
+                </Text>
+                {notes ? (
+                  <Text numberOfLines={1} style={[styles.chapterNote, { color: t.accent }]}>
+                    {notes}
+                  </Text>
+                ) : null}
+              </View>
+              {marks.length ? <Ionicons name="bookmark" size={16} color={t.accent} /> : null}
               {current ? (
                 <Text style={{ color: t.accent, fontSize: 12 }}>
                   p.{resume!.page}/{resume!.total || '?'}
@@ -138,9 +156,12 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'space-between',
     gap: 12,
-    height: 52,
+    minHeight: 52,
+    paddingVertical: 8,
     marginHorizontal: 16,
     borderBottomWidth: StyleSheet.hairlineWidth,
   },
-  chapterName: { flex: 1, fontSize: 15 },
+  chapterText: { flex: 1 },
+  chapterName: { fontSize: 15 },
+  chapterNote: { fontSize: 12, marginTop: 2 },
 });

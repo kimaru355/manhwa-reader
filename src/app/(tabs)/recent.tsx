@@ -6,7 +6,6 @@ import { EmptyState } from '../../components/EmptyState';
 import { openManhwa } from '../../components/ManhwaGrid';
 import { useLibrary } from '../../lib/library';
 import { useTheme } from '../../lib/theme';
-
 function ago(ts: number) {
   const days = Math.floor((Date.now() - ts) / 86_400_000);
   if (days <= 0) return 'Today';

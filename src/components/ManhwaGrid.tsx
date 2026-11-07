@@ -3,8 +3,7 @@ import { FlatList, Pressable, RefreshControl, StyleSheet, Text, View } from 'rea
 
 import { useLibrary } from '../lib/library';
 import { useTheme } from '../lib/theme';
-import type { Manhwa } from '../lib/types';
-import { Cover } from './Cover';
+import type { Manhwa } from '../lib/types';import { Cover } from './Cover';
 
 const COLUMNS = 3;
 
@@ -38,7 +37,7 @@ export function ManhwaGrid({
       renderItem={({ item }) => {
         const progress = getProgress(item.id);
         const sub = progress
-          ? `${item.chapters[progress.chapterIndex]?.name ?? '—'}`
+          ? (item.chapters[progress.chapterIndex]?.name ?? '—')
           : `${item.chapters.length} chapter${item.chapters.length === 1 ? '' : 's'}`;
         return (
           <Pressable style={styles.cell} onPress={() => openManhwa(item.id)}>

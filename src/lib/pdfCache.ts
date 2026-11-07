@@ -2,8 +2,7 @@ import * as FS from 'expo-file-system/legacy';
 
 import { hash } from './util';
 
-// react-native-pdf can't reliably open content:// (SAF) URIs, so chapters are
-// copied into app cache and opened from there.
+// Chapters are copied into app cache and opened from there as plain file:// paths.
 const dir = `${FS.cacheDirectory}pdf/`;
 const MAX_FILES = 8;
 

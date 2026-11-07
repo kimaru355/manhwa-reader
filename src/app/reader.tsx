@@ -4,20 +4,14 @@ import { router, useLocalSearchParams } from 'expo-router';
 import { useKeepAwake } from 'expo-keep-awake';
 import { StatusBar } from 'expo-status-bar';
 import { useEffect, useRef, useState } from 'react';
-import {
-  ActivityIndicator,
-  FlatList,
-  Modal,
-  Pressable,
-  StyleSheet,
-  Text,
-  View,
-} from 'react-native';
+import { ActivityIndicator, FlatList, Modal, Pressable, StyleSheet, Text, View } from 'react-native';
 import Pdf, { type PdfRef } from 'react-native-pdf';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
+import { BookmarksSheet } from '../components/BookmarksSheet';
 import { useLibrary } from '../lib/library';
 import { ensureLocal, localPath, prune } from '../lib/pdfCache';
+import type { Bookmark } from '../lib/types';
 
 const BG = '#0B0B0D';
 const ACCENT = '#B76CF0';
@@ -27,7 +21,7 @@ export default function Reader() {
   useKeepAwake();
   const insets = useSafeAreaInsets();
   const params = useLocalSearchParams<{ id: string; ch?: string; page?: string }>();
-  const { getManhwa, saveProgress } = useLibrary();
+  const { getManhwa, saveProgress, getBookmarks, addBookmark, removeBookmark, updateBookmark } = useLibrary();
   const manhwa = getManhwa(params.id);
   const chapters = manhwa?.chapters ?? [];
 
@@ -42,6 +36,7 @@ export default function Reader() {
   const [scrubbing, setScrubbing] = useState<number | null>(null);
   const [chrome, setChrome] = useState(true);
   const [listOpen, setListOpen] = useState(false);
+  const [marksOpen, setMarksOpen] = useState(false);
   const pdfRef = useRef<PdfRef>(null);
   const tracking = useRef(false);
 
@@ -61,9 +56,9 @@ export default function Reader() {
       (p) => {
         if (!alive) return;
         setPath(p);
-        // Warm the neighbours so chapter changes open instantly.
+        // Warm the next chapter so changing chapters opens instantly.
         if (next) ensureLocal(next.uri).catch(() => {});
-        prune([p, localPath(chapter.uri), ...(next ? [localPath(next.uri)] : []), ...(prev ? [localPath(prev.uri)] : [])]);
+        prune([p, ...(next ? [localPath(next.uri)] : []), ...(prev ? [localPath(prev.uri)] : [])]);
       },
       (e) => alive && setError(String(e?.message ?? e)),
     );
@@ -100,6 +95,16 @@ export default function Reader() {
   };
 
   const atEnd = total > 0 && page >= total;
+  const bookmarks = getBookmarks(manhwa.id);
+  const chapterMarked = bookmarks.some((b) => b.chapterUri === chapter.uri);
+
+  const openBookmark = (b: Bookmark) => {
+    const idx = chapters.findIndex((c) => c.uri === b.chapterUri);
+    if (idx === -1) return;
+    setMarksOpen(false);
+    if (idx === chIdx) jump(b.page);
+    else goTo(idx, b.page);
+  };
 
   return (
     <View style={styles.fill}>
@@ -120,7 +125,6 @@ export default function Reader() {
           enablePaging={false}
           enableAntialiasing
           enableDoubleTapZoom
-          trustAllCerts={false}
           renderActivityIndicator={() => <ActivityIndicator color={ACCENT} size="large" />}
           onLoadComplete={(n) => {
             setTotal(n);
@@ -180,10 +184,27 @@ export default function Reader() {
                 {manhwa.title}
               </Text>
             </View>
-            <Pressable hitSlop={12} onPress={() => setListOpen(true)}>
+            <Pressable hitSlop={10} onPress={() => setMarksOpen(true)}>
+              <Ionicons name={chapterMarked ? 'bookmark' : 'bookmark-outline'} size={24} color={chapterMarked ? ACCENT : '#fff'} />
+            </Pressable>
+            <Pressable hitSlop={10} onPress={() => setListOpen(true)}>
               <Ionicons name="list" size={26} color="#fff" />
             </Pressable>
           </View>
+
+          <BookmarksSheet
+            visible={marksOpen}
+            onClose={() => setMarksOpen(false)}
+            chapters={chapters}
+            current={{ chapter, page }}
+            bookmarks={bookmarks}
+            onAdd={(note) =>
+              addBookmark({ manhwaId: manhwa.id, chapterUri: chapter.uri, chapterName: chapter.name, page, note })
+            }
+            onOpen={openBookmark}
+            onRemove={removeBookmark}
+            onEdit={updateBookmark}
+          />
 
           <View style={[styles.bottom, { paddingBottom: insets.bottom + 12 }]}>
             <Text style={styles.pageLabel}>
@@ -231,7 +252,7 @@ export default function Reader() {
                 <Text numberOfLines={1} style={[styles.sheetName, index === chIdx && { color: ACCENT, fontWeight: '700' }]}>
                   {item.name}
                 </Text>
-                {index === chIdx ? <Ionicons name="bookmark" size={18} color={ACCENT} /> : null}
+                {index === chIdx ? <Ionicons name="play" size={16} color={ACCENT} /> : null}
               </Pressable>
             )}
           />
