@@ -24,6 +24,8 @@ type Props = {
   /** Where the reader is right now. */
   current: { chapter: Chapter; page: number };
   bookmarks: Bookmark[];
+  /** Bookmarks from the author's recommendation; read-only. */
+  author?: Bookmark[];
   onAdd: (note: string) => void;
   onOpen: (b: Bookmark) => void;
   onRemove: (id: string) => void;
@@ -31,13 +33,13 @@ type Props = {
 };
 
 /** Reader sheet: bookmark the current spot with an optional note, and jump to saved ones. */
-export function BookmarksSheet({ visible, onClose, chapters, current, bookmarks, onAdd, onOpen, onRemove, onEdit }: Props) {
+export function BookmarksSheet({ visible, onClose, chapters, current, bookmarks, author = [], onAdd, onOpen, onRemove, onEdit }: Props) {
   const insets = useSafeAreaInsets();
   const [note, setNote] = useState('');
   const [editing, setEditing] = useState<Bookmark | null>(null);
 
   const order = (b: Bookmark) => {
-    const i = chapters.findIndex((c) => c.uri === b.chapterUri);
+    const i = chapters.findIndex((c) => c.id === b.chapterId);
     return i === -1 ? Number.MAX_SAFE_INTEGER : i;
   };
   const sorted = [...bookmarks].sort((a, b) => order(a) - order(b) || a.page - b.page);
@@ -115,12 +117,32 @@ export function BookmarksSheet({ visible, onClose, chapters, current, bookmarks,
                     </Pressable>
                   ) : null}
                 </View>
+                {author.length ? (
+                  <View>
+                    <Text style={[styles.title, { paddingTop: 8 }]}>Author’s bookmarks</Text>
+                    {author.map((b) => (
+                      <Pressable key={b.id} style={styles.row} onPress={() => onOpen(b)}>
+                        <Ionicons name="sparkles" size={18} color={ACCENT} />
+                        <View style={styles.rowText}>
+                          <Text numberOfLines={1} style={styles.rowTitle}>
+                            {b.chapterName} · p.{b.page}
+                          </Text>
+                          {b.note ? (
+                            <Text numberOfLines={2} style={styles.rowNote}>
+                              {b.note}
+                            </Text>
+                          ) : null}
+                        </View>
+                      </Pressable>
+                    ))}
+                  </View>
+                ) : null}
                 <Text style={[styles.title, { paddingTop: 8 }]}>
                   Saved{sorted.length ? ` (${sorted.length})` : ''}
                 </Text>
               </View>
             }
-            ListEmptyComponent={<Text style={styles.empty}>No bookmarks yet for this manhwa.</Text>}
+            ListEmptyComponent={<Text style={styles.empty}>No bookmarks of your own yet.</Text>}
             renderItem={({ item }) => {
               const exists = order(item) !== Number.MAX_SAFE_INTEGER;
               return (

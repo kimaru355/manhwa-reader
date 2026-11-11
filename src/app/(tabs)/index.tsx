@@ -1,92 +1,121 @@
 import { Ionicons } from '@expo/vector-icons';
-import { router } from 'expo-router';
 import { useMemo, useState } from 'react';
-import { ActivityIndicator, StyleSheet, Text, TextInput, View } from 'react-native';
+import { FlatList, Pressable, RefreshControl, StyleSheet, Text, View } from 'react-native';
 
+import { Cover } from '../../components/Cover';
 import { EmptyState } from '../../components/EmptyState';
-import { ManhwaGrid } from '../../components/ManhwaGrid';
-import { useLibrary } from '../../lib/library';
+import { Segmented } from '../../components/Segmented';
+import { TIER_LABEL, TIER_ORDER, toSeries, useRecs } from '../../lib/recs';
+import { openSeries } from '../../lib/series';
 import { useTheme } from '../../lib/theme';
+import type { Category, Series, Tier } from '../../lib/types';
+
+type Top = 'home' | 'interesting';
+
+const COLUMNS = 3;
+const CATEGORIES: { value: Category; label: string }[] = [
+  { value: 'manga', label: 'Manga' },
+  { value: 'manhwa', label: 'Manhwa' },
+  { value: 'novel', label: 'Novels' },
+];
+
+type Row = { type: 'header'; tier: Tier; count: number } | { type: 'cards'; items: Series[]; id: string };
 
 export default function Home() {
   const t = useTheme();
-  const { ready, folders, library, scanning, scanError, rescan } = useLibrary();
-  const [query, setQuery] = useState('');
+  const { recs, loading, error, refresh } = useRecs();
+  const [top, setTop] = useState<Top>('home');
+  const [category, setCategory] = useState<Category>('manga');
+  const shown: Category = top === 'interesting' ? 'interesting' : category;
 
-  const data = useMemo(() => {
-    const q = query.trim().toLowerCase();
-    return q ? library.filter((m) => m.title.toLowerCase().includes(q)) : library;
-  }, [library, query]);
+  const rows = useMemo(() => {
+    const out: Row[] = [];
+    for (const tier of TIER_ORDER) {
+      const list = recs.recommendations.filter((r) => r.category === shown && r.tier === tier).map(toSeries);
+      if (!list.length) continue;
+      out.push({ type: 'header', tier, count: list.length });
+      for (let i = 0; i < list.length; i += COLUMNS) {
+        out.push({ type: 'cards', items: list.slice(i, i + COLUMNS), id: `${tier}-${i}` });
+      }
+    }
+    return out;
+  }, [recs, shown]);
 
-  if (!ready) return null;
-
-  if (folders.length === 0) {
-    return (
-      <EmptyState
-        icon="folder-open-outline"
-        title="No manhwa folders yet"
-        message="Add a folder in Settings and your PDF manhwa will show up here."
-        action="Open Settings"
-        onAction={() => router.navigate('/settings')}
-      />
-    );
-  }
-
-  if (library.length === 0) {
-    return scanning ? (
-      <View style={styles.center}>
-        <ActivityIndicator color={t.accent} size="large" />
-        <Text style={{ color: t.sub, marginTop: 12 }}>Scanning folders…</Text>
-      </View>
-    ) : (
-      <EmptyState
-        icon="document-outline"
-        title="No manhwa found"
-        message={
-          scanError ??
-          'None of your folders contain PDFs. Each manhwa should be a folder holding one PDF per chapter.'
-        }
-        action="Scan again"
-        onAction={rescan}
-      />
-    );
-  }
+  const noteFor = (key: string) => recs.recommendations.find((r) => `${r.source}:${r.id}` === key)?.note;
 
   return (
     <View style={styles.flex}>
-      <View style={[styles.search, { backgroundColor: t.card }]}>
-        <Ionicons name="search" size={18} color={t.sub} />
-        <TextInput
-          value={query}
-          onChangeText={setQuery}
-          placeholder={`Search ${library.length} manhwa`}
-          placeholderTextColor={t.sub}
-          style={[styles.input, { color: t.text }]}
-          autoCorrect={false}
-          returnKeyType="search"
-        />
-        {query ? <Ionicons name="close-circle" size={18} color={t.sub} onPress={() => setQuery('')} /> : null}
-      </View>
-      {data.length === 0 ? (
-        <EmptyState icon="search" title="No matches" />
-      ) : (
-        <ManhwaGrid data={data} onRefresh={rescan} refreshing={scanning} />
-      )}
+      <Segmented
+        variant="tabs"
+        value={top}
+        onChange={setTop}
+        options={[
+          { value: 'home', label: 'Home' },
+          { value: 'interesting', label: 'Interesting' },
+        ]}
+      />
+      {top === 'home' ? <Segmented value={category} onChange={setCategory} options={CATEGORIES} /> : null}
+
+      {error ? <Text style={[styles.error, { color: t.danger }]}>{error}</Text> : null}
+
+      <FlatList
+        data={rows}
+        keyExtractor={(r) => (r.type === 'header' ? `h-${r.tier}` : r.id)}
+        contentContainerStyle={styles.list}
+        refreshControl={<RefreshControl refreshing={loading} onRefresh={() => refresh()} tintColor={t.accent} />}
+        ListEmptyComponent={
+          <EmptyState
+            icon="sparkles-outline"
+            title="No recommendations here yet"
+            message="The author hasn't recommended anything in this section. Pull down to refresh, or browse Discover."
+          />
+        }
+        renderItem={({ item }) =>
+          item.type === 'header' ? (
+            <View style={styles.header}>
+              <Text style={[styles.headerText, { color: t.text }]}>{TIER_LABEL[item.tier]}</Text>
+              <Text style={{ color: t.sub }}>{item.count}</Text>
+            </View>
+          ) : (
+            <View style={styles.row}>
+              {item.items.map((s) => (
+                <Pressable key={s.key} style={styles.cell} onPress={() => openSeries(s)}>
+                  <Cover series={s} style={styles.cover} />
+                  <Text numberOfLines={2} style={[styles.title, { color: t.text }]}>
+                    {s.title}
+                  </Text>
+                  {noteFor(s.key) ? (
+                    <View style={styles.noteRow}>
+                      <Ionicons name="sparkles" size={11} color={t.accent} />
+                      <Text numberOfLines={1} style={[styles.note, { color: t.sub }]}>
+                        {noteFor(s.key)}
+                      </Text>
+                    </View>
+                  ) : null}
+                </Pressable>
+              ))}
+              {/* Pads a short last row so cards keep their width. */}
+              {Array.from({ length: COLUMNS - item.items.length }, (_, i) => (
+                <View key={`pad-${i}`} style={styles.cell} />
+              ))}
+            </View>
+          )
+        }
+      />
     </View>
   );
 }
 
 const styles = StyleSheet.create({
   flex: { flex: 1 },
-  center: { flex: 1, alignItems: 'center', justifyContent: 'center' },
-  search: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-    marginHorizontal: 12,
-    marginTop: 4,
-    paddingHorizontal: 12,
-    borderRadius: 10,
-  },
-  input: { flex: 1, height: 42, fontSize: 15 },
+  error: { fontSize: 12, paddingHorizontal: 14, paddingTop: 8 },
+  list: { paddingHorizontal: 12, paddingBottom: 24, flexGrow: 1 },
+  header: { flexDirection: 'row', alignItems: 'baseline', gap: 8, paddingTop: 18, paddingBottom: 8 },
+  headerText: { fontSize: 18, fontWeight: '700' },
+  row: { flexDirection: 'row', gap: 10, marginBottom: 14 },
+  cell: { flex: 1 },
+  cover: { width: '100%', aspectRatio: 0.72 },
+  title: { marginTop: 6, fontSize: 14, fontWeight: '500', lineHeight: 18 },
+  noteRow: { flexDirection: 'row', alignItems: 'center', gap: 4, marginTop: 2 },
+  note: { flex: 1, fontSize: 11 },
 });

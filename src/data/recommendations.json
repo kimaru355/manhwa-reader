@@ -1,0 +1,39 @@
+{
+  "version": 1,
+  "updated": "2026-11-11",
+  "sources": {
+    "manga": [{ "source": "mangadex", "name": "MangaDex" }],
+    "manhwa": [{ "source": "webtoons", "name": "WEBTOON" }],
+    "interesting": [{ "source": "hentai20", "name": "Hentai20" }],
+    "novel": []
+  },
+  "recommendations": [
+    {
+      "source": "mangadex",
+      "id": "77bee52c-d2d6-44ad-a33a-1734c1fe696a",
+      "title": "The Eminence in Shadow",
+      "category": "manga",
+      "tier": "all-time",
+      "note": "Sample entry. Replace this file with your own recommendations.",
+      "bookmarks": []
+    },
+    {
+      "source": "webtoons",
+      "id": "10336",
+      "title": "I Only Need Our Child, Your Grace",
+      "cover": "https://webtoon-phinf.pstatic.net/20260615_184/17815033012754vhSx_JPEG/3Thumb_Poster-2_10336.jpg?type=q70",
+      "category": "manhwa",
+      "tier": "trial",
+      "note": "Sample entry.",
+      "bookmarks": [{ "chapterId": "1", "chapterName": "Ep. 1 - The Second \"First Night\"", "page": 1, "note": "Where the hook lands" }]
+    },
+    {
+      "source": "hentai20",
+      "id": "secret-class",
+      "title": "Secret Class",
+      "category": "interesting",
+      "tier": "good",
+      "note": "Sample entry."
+    }
+  ]
+}

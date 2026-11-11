@@ -1,6 +1,6 @@
 import { Ionicons } from '@expo/vector-icons';
-import { Tabs } from 'expo-router';
-import type { ColorValue } from 'react-native';
+import { router, Tabs } from 'expo-router';
+import { Pressable, type ColorValue } from 'react-native';
 
 import { useTheme } from '../../lib/theme';
 
@@ -22,17 +22,26 @@ export default function TabsLayout() {
         headerStyle: { backgroundColor: t.bg },
         headerShadowVisible: false,
         headerTitleStyle: { color: t.text, fontWeight: '700' },
+        headerRight: () => (
+          <Pressable hitSlop={10} style={{ marginRight: 16 }} onPress={() => router.navigate('/settings')}>
+            <Ionicons name="settings-outline" size={22} color={t.text} />
+          </Pressable>
+        ),
         tabBarActiveTintColor: t.accent,
         tabBarInactiveTintColor: t.sub,
         tabBarStyle: { backgroundColor: t.bg, borderTopColor: t.border },
+        tabBarLabelStyle: { fontSize: 11 },
         sceneStyle: { backgroundColor: t.bg },
       }}
     >
       <Tabs.Screen name="index" options={tab('Home', 'home', 'home-outline')} />
+      <Tabs.Screen name="discover" options={tab('Discover', 'compass', 'compass-outline')} />
+      <Tabs.Screen name="downloads" options={tab('Downloads', 'download', 'download-outline')} />
       <Tabs.Screen name="favorites" options={tab('Favorites', 'heart', 'heart-outline')} />
       <Tabs.Screen name="wishlist" options={tab('Wishlist', 'star', 'star-outline')} />
-      <Tabs.Screen name="recent"options={tab('Recent', 'time', 'time-outline')} />
-      <Tabs.Screen name="settings" options={tab('Settings', 'settings', 'settings-outline')} />
+      <Tabs.Screen name="recent" options={tab('Recent', 'time', 'time-outline')} />
+      {/* Reached from the gear in the header; kept out of the tab bar. */}
+      <Tabs.Screen name="settings" options={{ title: 'Settings', href: null, headerRight: () => null }} />
     </Tabs>
   );
 }

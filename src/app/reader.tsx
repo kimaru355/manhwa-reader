@@ -1,78 +1,164 @@
 import { Ionicons } from '@expo/vector-icons';
 import Slider from '@react-native-community/slider';
-import { router, useLocalSearchParams } from 'expo-router';
+import { Image } from 'expo-image';
 import { useKeepAwake } from 'expo-keep-awake';
+import { router, useLocalSearchParams } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
-import { useEffect, useRef, useState } from 'react';
-import { ActivityIndicator, FlatList, Modal, Pressable, StyleSheet, Text, View } from 'react-native';
-import Pdf, { type PdfRef } from 'react-native-pdf';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import {
+  ActivityIndicator,
+  FlatList,
+  Image as RNImage,
+  Modal,
+  Pressable,
+  StyleSheet,
+  Text,
+  useWindowDimensions,
+  View,
+  type NativeScrollEvent,
+  type NativeSyntheticEvent,
+} from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { BookmarksSheet } from '../components/BookmarksSheet';
+import { StatusPill } from '../components/StatusPill';
+import { useDownloads } from '../lib/downloads';
+import { chapterDir, fetchPages, pruneTemp } from '../lib/files';
 import { useLibrary } from '../lib/library';
-import { ensureLocal, localPath, prune } from '../lib/pdfCache';
-import type { Bookmark } from '../lib/types';
+import { useRecs } from '../lib/recs';
+import { parseRef, useChapters } from '../lib/series';
+import { getSource } from '../lib/sources';
+import type { Bookmark, Chapter } from '../lib/types';
+import { mapLimit } from '../lib/util';
 
 const BG = '#0B0B0D';
 const ACCENT = '#B76CF0';
 const ROW_HEIGHT = 52;
 
+type Loaded = { uris: string[]; ratios: number[] };
+
+/** Index of the last offset that is <= y. */
+function indexAt(offsets: number[], y: number) {
+  let lo = 0;
+  let hi = offsets.length - 1;
+  while (lo < hi) {
+    const mid = (lo + hi + 1) >> 1;
+    if (offsets[mid] <= y) lo = mid;
+    else hi = mid - 1;
+  }
+  return lo;
+}
+
 export default function Reader() {
   useKeepAwake();
   const insets = useSafeAreaInsets();
-  const params = useLocalSearchParams<{ id: string; ch?: string; page?: string }>();
-  const { getManhwa, saveProgress, getBookmarks, addBookmark, removeBookmark, updateBookmark } = useLibrary();
-  const manhwa = getManhwa(params.id);
-  const chapters = manhwa?.chapters ?? [];
+  const { width, height } = useWindowDimensions();
+  const params = useLocalSearchParams<{ ref: string; ch?: string; page?: string }>();
+  const series = useMemo(() => parseRef(params.ref), [params.ref]);
+  const { saveProgress, getBookmarks, addBookmark, removeBookmark, updateBookmark } = useLibrary();
+  const { find } = useRecs();
+  const dl = useDownloads();
+  const { chapters } = useChapters(series);
 
-  const [chIdx, setChIdx] = useState(() =>
-    Math.min(Math.max(Number(params.ch) || 0, 0), Math.max(chapters.length - 1, 0)),
-  );
+  const [chId, setChId] = useState(params.ch ?? '');
   const [startPage, setStartPage] = useState(() => Math.max(Number(params.page) || 1, 1));
-  const [path, setPath] = useState<string | null>(null);
+  const [loaded, setLoaded] = useState<Loaded | null>(null);
+  const [progress, setProgress] = useState({ done: 0, total: 0 });
   const [error, setError] = useState<string | null>(null);
+  const [attempt, setAttempt] = useState(0);
   const [page, setPage] = useState(startPage);
-  const [total, setTotal] = useState(0);
   const [scrubbing, setScrubbing] = useState<number | null>(null);
   const [chrome, setChrome] = useState(true);
   const [listOpen, setListOpen] = useState(false);
   const [marksOpen, setMarksOpen] = useState(false);
-  const pdfRef = useRef<PdfRef>(null);
+  const listRef = useRef<FlatList<string>>(null);
   const tracking = useRef(false);
 
-  const chapter = chapters[chIdx];
-  const prev = chapters[chIdx - 1];
-  const next = chapters[chIdx + 1];
+  const idx = chapters.findIndex((c) => c.id === chId);
+  // A downloaded chapter opens without waiting for the chapter list to load.
+  const chapter: Chapter | undefined = chapters[idx] ?? dl.getChapter(series?.key ?? '', chId);
+  const prev = idx > 0 ? chapters[idx - 1] : undefined;
+  const next = idx >= 0 ? chapters[idx + 1] : undefined;
+  const total = loaded?.uris.length ?? 0;
 
   useEffect(() => {
-    if (!chapter) return;
+    if (!series || !chapter) return;
     let alive = true;
     tracking.current = false;
-    setPath(null);
+    // Resetting for the new chapter before it loads.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setLoaded(null);
     setError(null);
-    setTotal(0);
+    setProgress({ done: 0, total: 0 });
     setPage(startPage);
-    ensureLocal(chapter.uri).then(
-      (p) => {
-        if (!alive) return;
-        setPath(p);
-        // Warm the next chapter so changing chapters opens instantly.
-        if (next) ensureLocal(next.uri).catch(() => {});
-        prune([p, ...(next ? [localPath(next.uri)] : []), ...(prev ? [localPath(prev.uri)] : [])]);
-      },
-      (e) => alive && setError(String(e?.message ?? e)),
-    );
+    (async () => {
+      const saved = dl.getChapter(series.key, chapter.id);
+      let dir: string;
+      let names: string[];
+      if (saved) {
+        dir = chapterDir(series.key, chapter.id, true);
+        names = saved.files;
+      } else {
+        const source = getSource(series.source);
+        if (!source) throw new Error('This title cannot be read in the app.');
+        dir = chapterDir(series.key, chapter.id, false);
+        const urls = await source.pages(series, chapter);
+        // The whole chapter is fetched at full quality before it opens, so nothing loads mid-read.
+        names = await fetchPages(
+          urls,
+          dir,
+          source.imageHeaders,
+          (done, tot) => alive && setProgress({ done, total: tot }),
+          () => !alive,
+        );
+      }
+      const uris = names.map((n) => `${dir}${n}`);
+      const ratios = await mapLimit(
+        uris,
+        8,
+        (uri) =>
+          new Promise<number>((resolve) =>
+            RNImage.getSize(
+              uri,
+              (w, h) => resolve(w > 0 ? h / w : 1.4),
+              () => resolve(1.4),
+            ),
+          ),
+      );
+      if (!alive) return;
+      setLoaded({ uris, ratios });
+      if (!saved) pruneTemp();
+      // Ignore the initial scroll so a fresh open can't overwrite saved progress.
+      setTimeout(() => alive && (tracking.current = true), 600);
+    })().catch((e) => alive && String(e?.message) !== 'Cancelled' && setError(String(e?.message ?? e)));
     return () => {
       alive = false;
     };
-    // startPage only matters at the moment the chapter changes
+    // Only a different chapter (or a retry) should reload; startPage is read at that moment.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [chapter?.uri]);
+  }, [series?.key, chapter?.id, attempt]);
 
-  if (!manhwa || !chapter) {
+  const heights = useMemo(() => loaded?.ratios.map((r) => Math.max(Math.round(r * width), 1)) ?? [], [loaded, width]);
+  const offsets = useMemo(() => {
+    const out: number[] = [];
+    let y = 0;
+    for (const h of heights) {
+      out.push(y);
+      y += h;
+    }
+    return out;
+  }, [heights]);
+
+  useEffect(() => {
+    if (!series || !chapter || !tracking.current || !total) return;
+    saveProgress({ series, chapterId: chapter.id, chapterName: chapter.name, page, total });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [page, total]);
+
+  if (!series || !chapter) {
     return (
       <View style={[styles.fill, styles.center]}>
-        <Text style={styles.dim}>Chapter not found.</Text>
+        <Text style={styles.dim}>{series && chapters.length === 0 ? 'Loading…' : 'Chapter not found.'}</Text>
         <Pressable onPress={() => router.back()} style={styles.pill}>
           <Text style={styles.pillText}>Go back</Text>
         </Pressable>
@@ -80,95 +166,120 @@ export default function Reader() {
     );
   }
 
-  const goTo = (i: number, p = 1) => {
-    if (i < 0 || i >= chapters.length) return;
+  const goTo = (c: Chapter | undefined, p = 1) => {
+    if (!c) return;
     setStartPage(p);
-    setChIdx(i);
+    setChId(c.id);
     setListOpen(false);
     setChrome(true);
   };
 
   const jump = (p: number) => {
     const clamped = Math.min(Math.max(Math.round(p), 1), Math.max(total, 1));
-    pdfRef.current?.setPage(clamped);
+    listRef.current?.scrollToIndex({ index: clamped - 1, animated: false });
     setPage(clamped);
   };
 
+  const onScroll = (e: NativeSyntheticEvent<NativeScrollEvent>) => {
+    if (!offsets.length) return;
+    const y = e.nativeEvent.contentOffset.y;
+    const p = indexAt(offsets, y + height * 0.35) + 1;
+    setPage((cur) => (cur === p ? cur : p));
+  };
+
   const atEnd = total > 0 && page >= total;
-  const bookmarks = getBookmarks(manhwa.id);
-  const chapterMarked = bookmarks.some((b) => b.chapterUri === chapter.uri);
+  const rec = find(series.key);
+  const author: Bookmark[] = (rec?.bookmarks ?? []).map((b, i) => ({
+    id: `author-${i}`,
+    seriesKey: series.key,
+    chapterId: b.chapterId,
+    chapterName: b.chapterName ?? chapters.find((c) => c.id === b.chapterId)?.name ?? b.chapterId,
+    page: b.page ?? 1,
+    note: b.note ?? '',
+    ts: 0,
+  }));
+  const bookmarks = getBookmarks(series.key);
+  const chapterMarked = bookmarks.some((b) => b.chapterId === chapter.id);
 
   const openBookmark = (b: Bookmark) => {
-    const idx = chapters.findIndex((c) => c.uri === b.chapterUri);
-    if (idx === -1) return;
+    const target = chapters.find((c) => c.id === b.chapterId);
+    if (!target) return;
     setMarksOpen(false);
-    if (idx === chIdx) jump(b.page);
-    else goTo(idx, b.page);
+    if (target.id === chapter.id) jump(b.page);
+    else goTo(target, b.page);
   };
 
   return (
     <View style={styles.fill}>
       <StatusBar hidden={!chrome} style="light" />
 
-      {path ? (
-        <Pdf
-          key={path}
-          ref={pdfRef}
-          source={{ uri: path }}
-          page={startPage}
-          style={styles.fill}
-          fitPolicy={0}
-          spacing={0}
-          minScale={1}
-          maxScale={4}
-          horizontal={false}
-          enablePaging={false}
-          enableAntialiasing
-          enableDoubleTapZoom
-          renderActivityIndicator={() => <ActivityIndicator color={ACCENT} size="large" />}
-          onLoadComplete={(n) => {
-            setTotal(n);
-            // Ignore the initial page event so a fresh open can't overwrite saved progress.
-            setTimeout(() => (tracking.current = true), 600);
-          }}
-          onPageChanged={(p, n) => {
-            setPage(p);
-            setTotal(n);
-            if (tracking.current) {
-              saveProgress({ manhwaId: manhwa.id, chapterIndex: chIdx, page: p, total: n });
-            }
-          }}
-          onPageSingleTap={() => setChrome((v) => !v)}
-          onError={(e) => setError(e.message)}
+      {loaded ? (
+        <FlatList
+          key={`${chapter.id}-${attempt}`}
+          ref={listRef}
+          data={loaded.uris}
+          keyExtractor={(u) => u}
+          initialScrollIndex={Math.min(startPage - 1, loaded.uris.length - 1)}
+          getItemLayout={(_, i) => ({ length: heights[i], offset: offsets[i], index: i })}
+          onScroll={onScroll}
+          scrollEventThrottle={32}
+          windowSize={7}
+          maxToRenderPerBatch={4}
+          showsVerticalScrollIndicator={false}
+          renderItem={({ item, index }) => (
+            <Pressable onPress={() => setChrome((v) => !v)}>
+              <Image
+                source={{ uri: item }}
+                style={{ width, height: heights[index] }}
+                contentFit="fill"
+                transition={0}
+                recyclingKey={item}
+              />
+            </Pressable>
+          )}
+          ListFooterComponent={
+            <View style={styles.footer}>
+              {next ? (
+                <Pressable style={styles.pill} onPress={() => goTo(next)}>
+                  <Text style={styles.pillText}>Next: {next.name}</Text>
+                  <Ionicons name="arrow-forward" size={16} color="#fff" />
+                </Pressable>
+              ) : (
+                <Text style={styles.dim}>Last chapter reached</Text>
+              )}
+            </View>
+          }
         />
       ) : error ? (
         <View style={[styles.fill, styles.center]}>
-          <Text style={styles.dim}>Couldn't open this chapter.</Text>
+          <Text style={styles.dim}>{"Couldn't open this chapter."}</Text>
           <Text style={[styles.dim, { fontSize: 12 }]}>{error}</Text>
-          <Pressable onPress={() => goTo(chIdx, startPage)} style={styles.pill}>
+          <Pressable onPress={() => setAttempt((n) => n + 1)} style={styles.pill}>
             <Text style={styles.pillText}>Retry</Text>
+          </Pressable>
+          <Pressable onPress={() => router.back()}>
+            <Text style={styles.dim}>Go back</Text>
           </Pressable>
         </View>
       ) : (
         <View style={[styles.fill, styles.center]}>
           <ActivityIndicator color={ACCENT} size="large" />
+          <Text style={styles.dim}>
+            {progress.total ? `Loading chapter… ${progress.done}/${progress.total}` : 'Loading chapter…'}
+          </Text>
         </View>
       )}
 
-      {atEnd ? (
+      {loaded && atEnd && next ? (
         <View style={[styles.endWrap, { bottom: chrome ? insets.bottom + 150 : insets.bottom + 32 }]} pointerEvents="box-none">
-          {next ? (
-            <Pressable style={styles.pill} onPress={() => goTo(chIdx + 1)}>
-              <Text style={styles.pillText}>Next: {next.name}</Text>
-              <Ionicons name="arrow-forward" size={16} color="#fff" />
-            </Pressable>
-          ) : (
-            <View style={[styles.pill, { backgroundColor: '#2A2A30' }]}>
-              <Text style={styles.pillText}>Last chapter reached</Text>
-            </View>
-          )}
+          <Pressable style={styles.pill} onPress={() => goTo(next)}>
+            <Text style={styles.pillText}>Next: {next.name}</Text>
+            <Ionicons name="arrow-forward" size={16} color="#fff" />
+          </Pressable>
         </View>
       ) : null}
+
+      {!chrome ? <StatusPill bottom={insets.bottom + 4} /> : null}
 
       {chrome ? (
         <>
@@ -181,7 +292,7 @@ export default function Reader() {
                 {chapter.name}
               </Text>
               <Text numberOfLines={1} style={styles.subtitle}>
-                {manhwa.title}
+                {series.title}
               </Text>
             </View>
             <Pressable hitSlop={10} onPress={() => setMarksOpen(true)}>
@@ -198,8 +309,9 @@ export default function Reader() {
             chapters={chapters}
             current={{ chapter, page }}
             bookmarks={bookmarks}
+            author={author}
             onAdd={(note) =>
-              addBookmark({ manhwaId: manhwa.id, chapterUri: chapter.uri, chapterName: chapter.name, page, note })
+              addBookmark({ seriesKey: series.key, chapterId: chapter.id, chapterName: chapter.name, page, note })
             }
             onOpen={openBookmark}
             onRemove={removeBookmark}
@@ -211,7 +323,7 @@ export default function Reader() {
               {scrubbing ?? page} / {total || '–'}
             </Text>
             <View style={styles.sliderRow}>
-              <Pressable hitSlop={10} disabled={!prev} onPress={() => goTo(chIdx - 1)} style={!prev && styles.off}>
+              <Pressable hitSlop={10} disabled={!prev} onPress={() => goTo(prev)} style={!prev && styles.off}>
                 <Ionicons name="play-skip-back" size={22} color="#fff" />
               </Pressable>
               <Slider
@@ -230,7 +342,7 @@ export default function Reader() {
                   jump(v);
                 }}
               />
-              <Pressable hitSlop={10} disabled={!next} onPress={() => goTo(chIdx + 1)} style={!next && styles.off}>
+              <Pressable hitSlop={10} disabled={!next} onPress={() => goTo(next)} style={!next && styles.off}>
                 <Ionicons name="play-skip-forward" size={22} color="#fff" />
               </Pressable>
             </View>
@@ -244,15 +356,15 @@ export default function Reader() {
           <Text style={styles.sheetTitle}>Jump to chapter</Text>
           <FlatList
             data={chapters}
-            keyExtractor={(c) => c.uri}
-            initialScrollIndex={chIdx}
+            keyExtractor={(c) => c.id}
+            initialScrollIndex={Math.max(idx, 0)}
             getItemLayout={(_, index) => ({ length: ROW_HEIGHT, offset: ROW_HEIGHT * index, index })}
-            renderItem={({ item, index }) => (
-              <Pressable style={styles.sheetRow} onPress={() => goTo(index)}>
-                <Text numberOfLines={1} style={[styles.sheetName, index === chIdx && { color: ACCENT, fontWeight: '700' }]}>
+            renderItem={({ item }) => (
+              <Pressable style={styles.sheetRow} onPress={() => goTo(item)}>
+                <Text numberOfLines={1} style={[styles.sheetName, item.id === chapter.id && { color: ACCENT, fontWeight: '700' }]}>
                   {item.name}
                 </Text>
-                {index === chIdx ? <Ionicons name="play" size={16} color={ACCENT} /> : null}
+                {item.id === chapter.id ? <Ionicons name="play" size={16} color={ACCENT} /> : null}
               </Pressable>
             )}
           />
@@ -266,6 +378,7 @@ const styles = StyleSheet.create({
   fill: { flex: 1, backgroundColor: BG },
   center: { alignItems: 'center', justifyContent: 'center', gap: 12, padding: 24 },
   dim: { color: '#9A9AA4', textAlign: 'center' },
+  footer: { alignItems: 'center', paddingVertical: 48 },
   pill: {
     flexDirection: 'row',
     alignItems: 'center',

@@ -15,17 +15,19 @@ export function parseSnapshot(text: string): Snapshot | null {
   try {
     const o = JSON.parse(text);
     if (!o || o.app !== 'manhwa-reader') return null;
+    // Version 1 backups described PDF folders, which no longer exist in the app.
+    if (o.version !== 2) throw new Error('This backup was made by an older version of the app and cannot be imported.');
     return {
       app: 'manhwa-reader',
-      version: 1,
+      version: 2,
       savedAt: typeof o.savedAt === 'number' ? o.savedAt : Date.now(),
-      folders: isArr(o.folders) ? (o.folders as Snapshot['folders']) : [],
-      favorites: isArr(o.favorites) ? (o.favorites as string[]) : [],
-      wishlist: isArr(o.wishlist) ? (o.wishlist as string[]) : [],
+      favorites: isArr(o.favorites) ? (o.favorites as Snapshot['favorites']) : [],
+      wishlist: isArr(o.wishlist) ? (o.wishlist as Snapshot['wishlist']) : [],
       recents: isArr(o.recents) ? (o.recents as Snapshot['recents']) : [],
       bookmarks: isArr(o.bookmarks) ? (o.bookmarks as Snapshot['bookmarks']) : [],
     };
-  } catch {
+  } catch (e) {
+    if (e instanceof Error && e.message.startsWith('This backup')) throw e;
     return null;
   }
 }
@@ -51,7 +53,9 @@ export async function readBackup(dir: string): Promise<Snapshot | null> {
     try {
       const s = parseSnapshot(await FS.readAsStringAsync(f));
       if (s) return s;
-    } catch {}
+    } catch {
+      // Unreadable or older-format file: treat as no backup.
+    }
   }
   return null;
 }

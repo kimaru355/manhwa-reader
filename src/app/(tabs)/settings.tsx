@@ -1,25 +1,21 @@
 import { Ionicons } from '@expo/vector-icons';
-import { ActivityIndicator, Alert, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { useState } from 'react';
+import { ActivityIndicator, Alert, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 
 import { pickImportFile } from '../../lib/backup';
+import { clearTemp } from '../../lib/files';
 import { useLibrary } from '../../lib/library';
+import { useRecs } from '../../lib/recs';
 import { useTheme } from '../../lib/theme';
 import type { Snapshot } from '../../lib/types';
 
 const describe = (s: Snapshot) =>
-  `Saved ${new Date(s.savedAt).toLocaleString()}\n${s.folders.length} folders · ${s.favorites.length} favorites · ` +
+  `Saved ${new Date(s.savedAt).toLocaleString()}\n${s.favorites.length} favorites · ` +
   `${s.wishlist.length} wishlist · ${s.recents.length} recent · ${s.bookmarks.length} bookmarks`;
 
 export default function Settings() {
   const t = useTheme();
   const {
-    folders,
-    library,
-    scanning,
-    scanError,
-    addFolder,
-    removeFolder,
-    rescan,
     backupDir,
     lastBackup,
     backupError,
@@ -29,6 +25,9 @@ export default function Settings() {
     exportBackup,
     restoreSnapshot,
   } = useLibrary();
+  const recs = useRecs();
+  const [draft, setRecsUrl] = useState<string | null>(null);
+  const recsUrl = draft ?? recs.url;
 
   const fail = (e: unknown) => Alert.alert('Something went wrong', String((e as Error)?.message ?? e));
 
@@ -73,64 +72,59 @@ export default function Settings() {
     }
   };
 
-  const confirmRemove = (uri: string, name: string) =>
-    Alert.alert(`Remove "${name}"?`, 'Your files are not deleted. The manhwa from this folder just leave the app.', [
-      { text: 'Cancel', style: 'cancel' },
-      { text: 'Remove', style: 'destructive', onPress: () => removeFolder(uri) },
-    ]);
-
-  const countFor = (uri: string) => library.filter((m) => m.sourceUri === uri).length;
+  const updated = recs.recs.updated ? ` · updated ${recs.recs.updated}` : '';
 
   return (
     <ScrollView contentContainerStyle={styles.wrap}>
-      <Text style={[styles.section, { color: t.sub }]}>MANHWA FOLDERS</Text>
+      <Text style={[styles.section, { color: t.sub }]}>AUTHOR RECOMMENDATIONS</Text>
       <Text style={[styles.hint, { color: t.sub }]}>
-        Only these folders are scanned. Each manhwa is a folder holding one PDF per chapter; the folders directly
-        inside a folder you add are listed.
+        Home shows the author’s picks and chapter bookmarks from a JSON file. Paste its link to load a different
+        list; leave it empty to use the list built into the app.
+      </Text>
+      <TextInput
+        value={recsUrl}
+        onChangeText={setRecsUrl}
+        placeholder="https://…/recommendations.json"
+        placeholderTextColor={t.sub}
+        autoCapitalize="none"
+        autoCorrect={false}
+        keyboardType="url"
+        style={[styles.input, { backgroundColor: t.card, color: t.text }]}
+      />
+      <View style={styles.pair}>
+        <Pressable
+          onPress={() => {
+            recs.setUrl(recsUrl);
+            setRecsUrl(null);
+          }}
+          style={[styles.primary, styles.half, { backgroundColor: t.accent, marginTop: 0 }]}
+        >
+          {recs.loading ? <ActivityIndicator color="#fff" size="small" /> : <Ionicons name="cloud-download" size={18} color="#fff" />}
+          <Text style={styles.primaryText}>Save &amp; refresh</Text>
+        </Pressable>
+      </View>
+      <Text style={{ color: recs.error ? t.danger : t.sub, fontSize: 12 }}>
+        {recs.error ?? `${recs.recs.recommendations.length} recommendations${updated}`}
       </Text>
 
-      {folders.length === 0 ? (
-        <Text style={[styles.empty, { color: t.sub }]}>No folders added.</Text>
-      ) : (
-        folders.map((f) => (
-          <View key={f.uri} style={[styles.folder, { backgroundColor: t.card }]}>
-            <Ionicons name="folder" size={26} color={t.accent} />
-            <View style={styles.folderInfo}>
-              <Text numberOfLines={1} style={[styles.folderName, { color: t.text }]}>
-                {f.name}
-              </Text>
-              <Text style={{ color: t.sub, fontSize: 12 }}>{countFor(f.uri)} manhwa</Text>
-            </View>
-            <Pressable hitSlop={12} onPress={() => confirmRemove(f.uri, f.name)}>
-              <Ionicons name="trash-outline" size={22} color={t.danger} />
-            </Pressable>
-          </View>
-        ))
-      )}
-
-      {scanError ? <Text style={[styles.error, { color: t.danger }]}>{scanError}</Text> : null}
-
-      <Pressable onPress={addFolder} style={[styles.primary, { backgroundColor: t.accent }]}>
-        <Ionicons name="add" size={20} color="#fff" />
-        <Text style={styles.primaryText}>Add folder</Text>
+      <Text style={[styles.section, { color: t.sub, marginTop: 20 }]}>STORAGE</Text>
+      <Text style={[styles.hint, { color: t.sub }]}>
+        Chapters you open online are kept briefly so they load fast. Downloaded chapters stay until you delete them
+        from their title or the Downloads tab.
+      </Text>
+      <Pressable
+        onPress={() => clearTemp().then(() => Alert.alert('Cleared', 'Online reading cache emptied.'))}
+        style={[styles.secondary, { borderColor: t.border }]}
+      >
+        <Ionicons name="trash-outline" size={18} color={t.text} />
+        <Text style={{ color: t.text, fontSize: 15 }}>Clear reading cache</Text>
       </Pressable>
-
-      {folders.length > 0 ? (
-        <Pressable
-          onPress={rescan}
-          disabled={scanning}
-          style={[styles.secondary, { borderColor: t.border, opacity: scanning ? 0.6 : 1 }]}
-        >
-          {scanning ? <ActivityIndicator color={t.accent} size="small" /> : <Ionicons name="refresh" size={18} color={t.text} />}
-          <Text style={{ color: t.text, fontSize: 15 }}>{scanning ? 'Scanning…' : 'Rescan folders'}</Text>
-        </Pressable>
-      ) : null}
 
       <Text style={[styles.section, { color: t.sub, marginTop: 20 }]}>BACKUP &amp; RESTORE</Text>
       <Text style={[styles.hint, { color: t.sub }]}>
-        Favorites, wishlist, history, bookmarks and your folder list are saved to a “manhwa-reader” folder you
-        choose, so they survive uninstalling the app. After a reinstall, choose the same folder to restore them,
-        then add your manhwa folders again to re-grant access.
+        Favorites, wishlist, history and bookmarks are saved to a “manhwa-reader” folder you choose, so they survive
+        uninstalling the app. After a reinstall, choose the same folder to restore them. Downloaded chapters are not
+        part of the backup.
       </Text>
 
       {backupDir ? (
@@ -173,11 +167,10 @@ const styles = StyleSheet.create({
   wrap: { padding: 16, gap: 10 },
   section: { fontSize: 12, fontWeight: '700', letterSpacing: 0.8, marginTop: 4 },
   hint: { fontSize: 13, lineHeight: 18, marginBottom: 4 },
-  empty: { paddingVertical: 12 },
+  input: { height: 44, borderRadius: 10, paddingHorizontal: 12, fontSize: 14 },
   folder: { flexDirection: 'row', alignItems: 'center', gap: 12, padding: 14, borderRadius: 12 },
   folderInfo: { flex: 1 },
   folderName: { fontSize: 16, fontWeight: '600' },
-  error: { fontSize: 13, lineHeight: 18 },
   primary: {
     flexDirection: 'row',
     gap: 6,

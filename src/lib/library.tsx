@@ -13,18 +13,13 @@ import {
 import { AppState } from 'react-native';
 
 import { exportSnapshot, readBackup, resolveBackupDir, writeBackup } from './backup';
-import { scanFolder } from './scanner';
-import type { Bookmark, Folder, Manhwa, Recent, Snapshot } from './types';
-import { naturalCompare, nameFromUri } from './util';
+import type { Bookmark, Folder, Recent, Series, Snapshot } from './types';
 
 const KEYS = {
-  folders: 'folders',
-  // v3: chapter-per-PDF with hashed ids. Older keys held a different shape and are ignored.
-  library: 'library3',
-  favorites: 'favorites3',
-  recents: 'recents3',
-  wishlist: 'wishlist3',
-  bookmarks: 'bookmarks3',
+  favorites: 'favorites4',
+  recents: 'recents4',
+  wishlist: 'wishlist4',
+  bookmarks: 'bookmarks4',
   backupDir: 'backupDir',
 } as const;
 const MAX_RECENTS = 100;
@@ -40,31 +35,26 @@ async function load<T>(key: string, fallback: T): Promise<T> {
 
 const save = (key: string, value: unknown) => AsyncStorage.setItem(key, JSON.stringify(value)).catch(() => {});
 
+const toggled = (list: Series[], s: Series) =>
+  list.some((x) => x.key === s.key) ? list.filter((x) => x.key !== s.key) : [s, ...list];
+
 type LibraryContext = {
   ready: boolean;
-  folders: Folder[];
-  library: Manhwa[];
-  favorites: Manhwa[];
-  wishlist: Manhwa[];
-  recents: { recent: Recent; manhwa: Manhwa }[];
-  scanning: boolean;
-  scanError: string | null;
-  getManhwa: (id: string | undefined) => Manhwa | undefined;
-  getProgress: (id: string) => Recent | undefined;
-  isFavorite: (id: string) => boolean;
-  toggleFavorite: (id: string) => void;
-  isWishlisted: (id: string) => boolean;
-  toggleWishlist: (id: string) => void;
-  /** Bookmarks of one manhwa, ordered by when they were made (newest first). */
-  getBookmarks: (manhwaId: string) => Bookmark[];
+  favorites: Series[];
+  wishlist: Series[];
+  recents: Recent[];
+  getProgress: (key: string) => Recent | undefined;
+  isFavorite: (key: string) => boolean;
+  toggleFavorite: (s: Series) => void;
+  isWishlisted: (key: string) => boolean;
+  toggleWishlist: (s: Series) => void;
+  /** Bookmarks of one title, newest first. */
+  getBookmarks: (seriesKey: string) => Bookmark[];
   addBookmark: (b: Omit<Bookmark, 'id' | 'ts'>) => void;
   removeBookmark: (id: string) => void;
   updateBookmark: (id: string, note: string) => void;
-  addFolder: () => Promise<void>;
-  removeFolder: (uri: string) => void;
-  rescan: () => Promise<void>;
   saveProgress: (p: Omit<Recent, 'ts'>) => void;
-  removeRecent: (id: string) => void;
+  removeRecent: (key: string) => void;
   clearRecents: () => void;
   /** Folder the app keeps its data in (survives reinstall), if one was chosen. */
   backupDir: Folder | null;
@@ -90,41 +80,27 @@ export const useLibrary = () => {
 
 export function LibraryProvider({ children }: { children: ReactNode }) {
   const [ready, setReady] = useState(false);
-  const [folders, setFolders] = useState<Folder[]>([]);
-  const [library, setLibrary] = useState<Manhwa[]>([]);
-  const [favoriteIds, setFavoriteIds] = useState<string[]>([]);
-  const [recentList, setRecentList] = useState<Recent[]>([]);
-  const [wishlistIds, setWishlistIds] = useState<string[]>([]);
+  const [favorites, setFavorites] = useState<Series[]>([]);
+  const [recents, setRecents] = useState<Recent[]>([]);
+  const [wishlist, setWishlist] = useState<Series[]>([]);
   const [bookmarks, setBookmarks] = useState<Bookmark[]>([]);
-  const [scanning, setScanning] = useState(false);
-  const [scanError, setScanError] = useState<string | null>(null);
   const [backupDir, setBackupDir] = useState<Folder | null>(null);
   const [lastBackup, setLastBackup] = useState<number | null>(null);
   const [backupError, setBackupError] = useState<string | null>(null);
 
-  // Mirrors of state for async callbacks that must see the latest value.
-  const foldersRef = useRef(folders);
-  const libraryRef = useRef(library);
-  foldersRef.current = folders;
-  libraryRef.current = library;
-  const scanningRef = useRef(false);
   const saveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const backupDirRef = useRef<Folder | null>(null);
   const writeChain = useRef<Promise<void>>(Promise.resolve());
-  const latest = useRef({ folders, favoriteIds, wishlistIds, recentList, bookmarks });
+  const latest = useRef({ favorites, wishlist, recents, bookmarks });
   useEffect(() => {
-    latest.current = { folders, favoriteIds, wishlistIds, recentList, bookmarks };
+    latest.current = { favorites, wishlist, recents, bookmarks };
   });
 
   const buildSnapshot = (): Snapshot => ({
     app: 'manhwa-reader',
-    version: 1,
+    version: 2,
     savedAt: Date.now(),
-    folders: latest.current.folders,
-    favorites: latest.current.favoriteIds,
-    wishlist: latest.current.wishlistIds,
-    recents: latest.current.recentList,
-    bookmarks: latest.current.bookmarks,
+    ...latest.current,
   });
 
   /** Writes to the backup folder; writes are queued so they never overlap. */
@@ -144,102 +120,36 @@ export function LibraryProvider({ children }: { children: ReactNode }) {
     return writeChain.current;
   }, []);
 
-  const rescan = useCallback(async (override?: Folder[]) => {
-    if (scanningRef.current) return;
-    scanningRef.current = true;
-    setScanning(true);
-    setScanError(null);
-    const roots = override ?? foldersRef.current;
-    const previous = libraryRef.current;
-    const errors: string[] = [];
-    const merged: Manhwa[] = [];
-    const seen = new Set<string>();
-    for (const root of roots) {
-      let items: Manhwa[];
-      try {
-        items = await scanFolder(root);
-      } catch (e) {
-        errors.push(`${root.name}: access lost — tap Add folder and pick it again`);
-        items = previous.filter((m) => m.sourceUri === root.uri);
-      }
-      for (const m of items) {
-        if (seen.has(m.id)) continue;
-        seen.add(m.id);
-        merged.push(m);
-      }
-    }
-    merged.sort((a, b) => naturalCompare(a.title, b.title));
-    setLibrary(merged);
-    save(KEYS.library, merged);
-    setScanError(errors.length ? errors.join('\n') : null);
-    scanningRef.current = false;
-    setScanning(false);
-  }, []);
-
   useEffect(() => {
     (async () => {
-      const [f, l, fav, rec, wish, marks, bdir] = await Promise.all([
-        load<Folder[]>(KEYS.folders, []),
-        load<Manhwa[]>(KEYS.library, []),
-        load<string[]>(KEYS.favorites, []),
+      const [fav, rec, wish, marks, bdir] = await Promise.all([
+        load<Series[]>(KEYS.favorites, []),
         load<Recent[]>(KEYS.recents, []),
-        load<string[]>(KEYS.wishlist, []),
+        load<Series[]>(KEYS.wishlist, []),
         load<Bookmark[]>(KEYS.bookmarks, []),
         load<Folder | null>(KEYS.backupDir, null),
       ]);
       setBackupDir(bdir);
       backupDirRef.current = bdir;
-      setFolders(f);
-      setLibrary(l);
-      setFavoriteIds(fav);
-      setRecentList(rec);
-      setWishlistIds(wish);
+      setFavorites(fav);
+      setRecents(rec);
+      setWishlist(wish);
       setBookmarks(marks);
-      foldersRef.current = f;
-      libraryRef.current = l;
       setReady(true);
-      if (f.length) rescan(f);
     })();
-  }, [rescan]);
-
-  const addFolder = useCallback(async () => {
-    const res = await SAF.requestDirectoryPermissionsAsync();
-    if (!res.granted) return;
-    const uri = res.directoryUri;
-    // Already listed (e.g. restored from a backup): access is granted again now, so just rescan.
-    if (foldersRef.current.some((f) => f.uri === uri)) {
-      await rescan(foldersRef.current);
-      return;
-    }
-    const next = [...foldersRef.current, { uri, name: nameFromUri(uri) || 'Folder' }];
-    setFolders(next);
-    foldersRef.current = next;
-    save(KEYS.folders, next);
-    await rescan(next);
-  }, [rescan]);
-
-  const removeFolder = useCallback((uri: string) => {
-    const next = foldersRef.current.filter((f) => f.uri !== uri);
-    const lib = libraryRef.current.filter((m) => m.sourceUri !== uri);
-    setFolders(next);
-    setLibrary(lib);
-    foldersRef.current = next;
-    libraryRef.current = lib;
-    save(KEYS.folders, next);
-    save(KEYS.library, lib);
   }, []);
 
-  const toggleFavorite = useCallback((id: string) => {
-    setFavoriteIds((prev) => {
-      const next = prev.includes(id) ? prev.filter((x) => x !== id) : [id, ...prev];
+  const toggleFavorite = useCallback((s: Series) => {
+    setFavorites((prev) => {
+      const next = toggled(prev, s);
       save(KEYS.favorites, next);
       return next;
     });
   }, []);
 
-  const toggleWishlist = useCallback((id: string) => {
-    setWishlistIds((prev) => {
-      const next = prev.includes(id) ? prev.filter((x) => x !== id) : [id, ...prev];
+  const toggleWishlist = useCallback((s: Series) => {
+    setWishlist((prev) => {
+      const next = toggled(prev, s);
       save(KEYS.wishlist, next);
       return next;
     });
@@ -271,8 +181,8 @@ export function LibraryProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const saveProgress = useCallback((p: Omit<Recent, 'ts'>) => {
-    setRecentList((prev) => {
-      const next = [{ ...p, ts: Date.now() }, ...prev.filter((r) => r.manhwaId !== p.manhwaId)].slice(
+    setRecents((prev) => {
+      const next = [{ ...p, ts: Date.now() }, ...prev.filter((r) => r.series.key !== p.series.key)].slice(
         0,
         MAX_RECENTS,
       );
@@ -283,40 +193,29 @@ export function LibraryProvider({ children }: { children: ReactNode }) {
     });
   }, []);
 
-  const removeRecent = useCallback((id: string) => {
-    setRecentList((prev) => {
-      const next = prev.filter((r) => r.manhwaId !== id);
+  const removeRecent = useCallback((key: string) => {
+    setRecents((prev) => {
+      const next = prev.filter((r) => r.series.key !== key);
       save(KEYS.recents, next);
       return next;
     });
   }, []);
 
   const clearRecents = useCallback(() => {
-    setRecentList([]);
+    setRecents([]);
     save(KEYS.recents, []);
   }, []);
 
-  const restoreSnapshot = useCallback(
-    (s: Snapshot) => {
-      setFolders(s.folders);
-      foldersRef.current = s.folders;
-      // The library is rebuilt by scanning; folders whose access was lost show a prompt to add them again.
-      setLibrary([]);
-      libraryRef.current = [];
-      setFavoriteIds(s.favorites);
-      setWishlistIds(s.wishlist);
-      setRecentList(s.recents);
-      setBookmarks(s.bookmarks);
-      save(KEYS.folders, s.folders);
-      save(KEYS.library, []);
-      save(KEYS.favorites, s.favorites);
-      save(KEYS.wishlist, s.wishlist);
-      save(KEYS.recents, s.recents);
-      save(KEYS.bookmarks, s.bookmarks);
-      if (s.folders.length) rescan(s.folders);
-    },
-    [rescan],
-  );
+  const restoreSnapshot = useCallback((s: Snapshot) => {
+    setFavorites(s.favorites);
+    setWishlist(s.wishlist);
+    setRecents(s.recents);
+    setBookmarks(s.bookmarks);
+    save(KEYS.favorites, s.favorites);
+    save(KEYS.wishlist, s.wishlist);
+    save(KEYS.recents, s.recents);
+    save(KEYS.bookmarks, s.bookmarks);
+  }, []);
 
   const pickBackupFolder = useCallback(async () => {
     const res = await SAF.requestDirectoryPermissionsAsync();
@@ -353,7 +252,7 @@ export function LibraryProvider({ children }: { children: ReactNode }) {
     if (!ready || !backupDir) return;
     const t = setTimeout(() => flushBackup(), 2500);
     return () => clearTimeout(t);
-  }, [ready, backupDir, folders, favoriteIds, wishlistIds, recentList, bookmarks, flushBackup]);
+  }, [ready, backupDir, favorites, wishlist, recents, bookmarks, flushBackup]);
 
   useEffect(() => {
     const sub = AppState.addEventListener('change', (state) => {
@@ -363,33 +262,22 @@ export function LibraryProvider({ children }: { children: ReactNode }) {
   }, [flushBackup]);
 
   const value = useMemo<LibraryContext>(() => {
-    const byId = new Map(library.map((m) => [m.id, m]));
-    const favSet = new Set(favoriteIds);
-    const wishSet = new Set(wishlistIds);
+    const favSet = new Set(favorites.map((s) => s.key));
+    const wishSet = new Set(wishlist.map((s) => s.key));
     return {
       ready,
-      folders,
-      library,
-      favorites: favoriteIds.map((id) => byId.get(id)).filter((m): m is Manhwa => !!m),
-      wishlist: wishlistIds.map((id) => byId.get(id)).filter((m): m is Manhwa => !!m),
-      recents: recentList
-        .map((recent) => ({ recent, manhwa: byId.get(recent.manhwaId) }))
-        .filter((r): r is { recent: Recent; manhwa: Manhwa } => !!r.manhwa),
-      scanning,
-      scanError,
-      getManhwa: (id) => (id ? byId.get(id) : undefined),
-      getProgress: (id) => recentList.find((r) => r.manhwaId === id),
-      isFavorite: (id) => favSet.has(id),
+      favorites,
+      wishlist,
+      recents,
+      getProgress: (key) => recents.find((r) => r.series.key === key),
+      isFavorite: (key) => favSet.has(key),
       toggleFavorite,
-      isWishlisted: (id) => wishSet.has(id),
+      isWishlisted: (key) => wishSet.has(key),
       toggleWishlist,
-      getBookmarks: (manhwaId) => bookmarks.filter((b) => b.manhwaId === manhwaId),
+      getBookmarks: (seriesKey) => bookmarks.filter((b) => b.seriesKey === seriesKey),
       addBookmark,
       removeBookmark,
       updateBookmark,
-      addFolder,
-      removeFolder,
-      rescan: () => rescan(),
       saveProgress,
       removeRecent,
       clearRecents,
@@ -412,22 +300,15 @@ export function LibraryProvider({ children }: { children: ReactNode }) {
     exportBackup,
     restoreSnapshot,
     ready,
-    folders,
-    library,
-    favoriteIds,
-    recentList,
-    wishlistIds,
+    favorites,
+    recents,
+    wishlist,
     bookmarks,
-    scanning,
-    scanError,
     toggleFavorite,
     toggleWishlist,
     addBookmark,
     removeBookmark,
     updateBookmark,
-    addFolder,
-    removeFolder,
-    rescan,
     saveProgress,
     removeRecent,
     clearRecents,
