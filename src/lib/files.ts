@@ -12,7 +12,7 @@ export const seriesDir = (key: string) => `${SAVED}${hash(key)}/`;
 export const chapterDir = (key: string, chapterId: string, saved: boolean) =>
   `${saved ? SAVED : TEMP}${hash(key)}/${hash(chapterId)}/`;
 
-const extOf = (url: string) => url.split(/[?#]/)[0].match(/\.(jpe?g|png|webp|gif|avif)$/i)?.[1].toLowerCase() ?? 'jpg';
+export const extOf = (url: string) => url.split(/[?#]/)[0].match(/\.(jpe?g|png|webp|gif|avif)$/i)?.[1].toLowerCase() ?? 'jpg';
 
 async function exists(path: string) {
   const info = await FS.getInfoAsync(path);
@@ -36,6 +36,9 @@ export async function downloadFile(url: string, dest: string, headers: Record<st
   throw new FriendlyError(friendly(last));
 }
 
+/** File name of page `index` (0-based) of a chapter, e.g. `007.jpg`. */
+export const pageName = (url: string, index: number) => `${String(index + 1).padStart(3, '0')}.${extOf(url)}`;
+
 /**
  * Downloads every page of a chapter into `dir` at full quality. Pages already on disk are skipped,
  * so an interrupted download resumes. Returns the file names in reading order.
@@ -48,7 +51,7 @@ export async function fetchPages(
   shouldStop?: () => boolean,
 ): Promise<string[]> {
   await FS.makeDirectoryAsync(dir, { intermediates: true }).catch(() => {});
-  const names = urls.map((u, i) => `${String(i + 1).padStart(3, '0')}.${extOf(u)}`);
+  const names = urls.map(pageName);
   let done = 0;
   onProgress?.(0, urls.length);
   await mapLimit(urls, 4, async (url, i) => {
@@ -77,7 +80,7 @@ export const markDone = (dir: string, names: string[]) =>
 export const removeDir = (dir: string) => FS.deleteAsync(dir, { idempotent: true }).catch(() => {});
 
 /** Keeps only the few most recently opened online chapters. */
-export async function pruneTemp(keep = 24) {
+export async function pruneTemp(keep = 3) {
   try {
     const series = await FS.readDirectoryAsync(TEMP);
     const dirs: { path: string; time: number }[] = [];

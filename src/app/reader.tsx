@@ -26,12 +26,13 @@ import { StatusPill } from '../components/StatusPill';
 import { useAccount } from '../lib/account';
 import { submitBookmark } from '../lib/community';
 import { useDownloads } from '../lib/downloads';
-import { friendly, toastError } from '../lib/errors';
-import { chapterDir, pruneTemp } from '../lib/files';
+import { friendly, FriendlyError, toastError } from '../lib/errors';
+import { chapterDir, downloadFile, markDone, pageName, pruneTemp, readDone } from '../lib/files';
 import { useLibrary } from '../lib/library';
-import { AHEAD_INITIAL, AHEAD_MIN, AHEAD_STEP, loadOnlineChapter } from '../lib/prefetch';
+import { PageLoader } from '../lib/pageLoader';
 import { useRecs } from '../lib/recs';
 import { parseRef, useChapters, useCommunityBookmarks } from '../lib/series';
+import { getSource } from '../lib/sources';
 import type { Bookmark, Chapter } from '../lib/types';
 import { mapLimit } from '../lib/util';
 
@@ -39,7 +40,8 @@ const BG = '#0B0B0D';
 const ACCENT = '#B76CF0';
 const ROW_HEIGHT = 52;
 
-type Loaded = { uris: string[]; ratios: number[] };
+/** One page of the chapter. `uri` is null until it has been downloaded. */
+type Pg = { uri: string | null; ratio: number | null; failed: boolean };
 
 /** Index of the last offset that is <= y. */
 function indexAt(offsets: number[], y: number) {
@@ -68,7 +70,7 @@ export default function Reader() {
 
   const [chId, setChId] = useState(params.ch ?? '');
   const [startPage, setStartPage] = useState(() => Math.max(Number(params.page) || 1, 1));
-  const [loaded, setLoaded] = useState<Loaded | null>(null);
+  const [pages, setPages] = useState<Pg[] | null>(null);
   const [progress, setProgress] = useState({ done: 0, total: 0 });
   const [error, setError] = useState<string | null>(null);
   const [attempt, setAttempt] = useState(0);
@@ -77,17 +79,17 @@ export default function Reader() {
   const [chrome, setChrome] = useState(true);
   const [listOpen, setListOpen] = useState(false);
   const [marksOpen, setMarksOpen] = useState(false);
-  const listRef = useRef<FlatList<string>>(null);
+  const listRef = useRef<FlatList<Pg>>(null);
+  const loaderRef = useRef<PageLoader | null>(null);
   const tracking = useRef(false);
-  // Last chapter index that has been loaded ahead of the reader (-1 = none yet).
-  const cachedThrough = useRef(-1);
 
   const idx = chapters.findIndex((c) => c.id === chId);
   // A downloaded chapter opens without waiting for the chapter list to load.
   const chapter: Chapter | undefined = chapters[idx] ?? dl.getChapter(series?.key ?? '', chId);
   const prev = idx > 0 ? chapters[idx - 1] : undefined;
   const next = idx >= 0 ? chapters[idx + 1] : undefined;
-  const total = loaded?.uris.length ?? 0;
+  const total = pages?.length ?? 0;
+  const ready = pages !== null;
 
   useEffect(() => {
     if (!series || !chapter) return;
@@ -95,59 +97,108 @@ export default function Reader() {
     tracking.current = false;
     // Resetting for the new chapter before it loads.
     // eslint-disable-next-line react-hooks/set-state-in-effect
-    setLoaded(null);
+    setPages(null);
     setError(null);
     setProgress({ done: 0, total: 0 });
     setPage(startPage);
     (async () => {
       const saved = dl.getChapter(series.key, chapter.id);
+      const source = getSource(series.source);
+      const headers = source?.imageHeaders ?? {};
       let dir: string;
       let names: string[];
+      let urls: string[] | null = null;
       if (saved) {
         dir = chapterDir(series.key, chapter.id, true);
         names = saved.files;
       } else {
-        // The whole chapter is fetched at full quality before it opens, so nothing loads mid-read.
-        const res = await loadOnlineChapter(
-          series,
-          chapter,
-          (done, tot) => alive && setProgress({ done, total: tot }),
-          () => !alive,
-        );
-        dir = res.dir;
-        names = res.names;
+        dir = chapterDir(series.key, chapter.id, false);
+        const done = await readDone(dir);
+        if (done) names = done;
+        else {
+          if (!source) throw new FriendlyError('This title cannot be read in the app.');
+          urls = await source.pages(series, chapter);
+          names = urls.map((u, i) => pageName(u, i));
+        }
       }
-      const uris = names.map((n) => `${dir}${n}`);
-      const ratios = await mapLimit(
-        uris,
-        8,
-        (uri) =>
-          new Promise<number>((resolve) =>
-            RNImage.getSize(
-              uri,
-              (w, h) => resolve(w > 0 ? h / w : 1.4),
-              () => resolve(1.4),
-            ),
+
+      const state: Pg[] = names.map(() => ({ uri: null, ratio: null, failed: false }));
+      let shown = false;
+      const publish = () => alive && shown && setPages(state.slice());
+      const sizeOf = (uri: string) =>
+        new Promise<number>((resolve) =>
+          RNImage.getSize(
+            uri,
+            (w, h) => resolve(w > 0 ? h / w : 1.4),
+            () => resolve(1.4),
           ),
-      );
-      if (!alive) return;
-      setLoaded({ uris, ratios });
-      if (!saved) pruneTemp();
+        );
+
+      // Downloads one page (if it is not on disk yet) at full quality and measures it.
+      const fetchOne = async (i: number): Promise<boolean> => {
+        const uri = `${dir}${names[i]}`;
+        if (state[i].failed) {
+          state[i] = { uri: null, ratio: null, failed: false };
+          publish();
+        }
+        try {
+          if (urls) await downloadFile(urls[i], uri, headers);
+          state[i] = { uri, ratio: await sizeOf(uri), failed: false };
+        } catch (e) {
+          state[i] = { uri: null, ratio: null, failed: true };
+          publish();
+          toastError(e);
+          return false;
+        }
+        publish();
+        // Once every page is on disk the chapter opens instantly (and offline) next time.
+        if (urls && state.every((p) => p.uri)) markDone(dir, names);
+        return true;
+      };
+
+      if (!urls) {
+        // Everything is already on the phone: measure it all and open.
+        await mapLimit(names, 8, (_, i) => fetchOne(i));
+        if (!alive) return;
+        shown = true;
+        setPages(state.slice());
+      } else {
+        // Only the first pages are needed to start reading; the rest load as the reader moves on.
+        const start = Math.min(Math.max(startPage - 1, 0), names.length - 1);
+        const loader = new PageLoader(names.length, start, fetchOne);
+        loaderRef.current = loader;
+        await loader.loadInitial((done, tot) => alive && setProgress({ done, total: tot }));
+        if (!alive) return;
+        if (!state[start].uri) throw new FriendlyError("Couldn't load this chapter. Check your connection and try again.");
+        shown = true;
+        setPages(state.slice());
+        pruneTemp();
+      }
       // Ignore the initial scroll so a fresh open can't overwrite saved progress.
       setTimeout(() => alive && (tracking.current = true), 600);
     })().catch((e) => {
-      if (!alive || String(e?.message) === 'Cancelled') return;
+      if (!alive) return;
       setError(friendly(e));
       toastError(e);
     });
     return () => {
       alive = false;
+      loaderRef.current?.stop();
+      loaderRef.current = null;
     };
     // Only a different chapter (or a retry) should reload; startPage is read at that moment.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [series?.key, chapter?.id, attempt]);
 
-  const heights = useMemo(() => loaded?.ratios.map((r) => Math.max(Math.round(r * width), 1)) ?? [], [loaded, width]);
+  // Rough height for pages that have not loaded yet: the average of those that have.
+  const estimate = useMemo(() => {
+    const known = pages?.filter((p) => p.ratio).map((p) => p.ratio as number) ?? [];
+    return known.length ? known.reduce((a, b) => a + b, 0) / known.length : 1.4;
+  }, [pages]);
+  const heights = useMemo(
+    () => pages?.map((p) => Math.max(Math.round((p.ratio ?? estimate) * width), 1)) ?? [],
+    [pages, estimate, width],
+  );
   const offsets = useMemo(() => {
     const out: number[] = [];
     let y = 0;
@@ -158,44 +209,18 @@ export default function Reader() {
     return out;
   }, [heights]);
 
+  // As the reader moves, keep at least a few pages ready below (and fill in the ones above).
+  useEffect(() => {
+    if (ready) loaderRef.current?.advance(page - 1);
+  }, [page, ready]);
+
+  const retryPage = (i: number) => loaderRef.current?.retry(i);
+
   useEffect(() => {
     if (!series || !chapter || !tracking.current || !total) return;
     saveProgress({ series, chapterId: chapter.id, chapterName: chapter.name, page, total });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [page, total]);
-
-  // Read-ahead: keep upcoming chapters on disk so the next one opens instantly. Ten load first, and five
-  // more whenever five or fewer are left. Failures are silent; it simply tries again later.
-  useEffect(() => {
-    if (!series || !loaded || idx < 0) return;
-    const last = chapters.length - 1;
-    let through = cachedThrough.current;
-    if (through < idx) through = idx + AHEAD_INITIAL;
-    else if (through - idx <= AHEAD_MIN) through += AHEAD_STEP;
-    through = Math.min(through, last);
-    let alive = true;
-    (async () => {
-      const from = Math.max(cachedThrough.current, idx) + 1;
-      for (let i = from; i <= through && alive; i++) {
-        const next = chapters[i];
-        if (dl.getChapter(series.key, next.id)) {
-          cachedThrough.current = i;
-          continue;
-        }
-        try {
-          await loadOnlineChapter(series, next, undefined, () => !alive);
-          cachedThrough.current = i;
-        } catch {
-          return;
-        }
-      }
-    })();
-    return () => {
-      alive = false;
-    };
-    // Re-evaluated when the reader moves to another chapter or finishes loading one.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [idx, loaded, chapters.length]);
 
   if (!series || !chapter) {
     return (
@@ -286,30 +311,47 @@ An admin reviews it before anyone else sees it.`, [
     <View style={styles.fill}>
       <StatusBar hidden={!chrome} style="light" />
 
-      {loaded ? (
+      {pages ? (
         <FlatList
           key={`${chapter.id}-${attempt}`}
           ref={listRef}
-          data={loaded.uris}
-          keyExtractor={(u) => u}
-          initialScrollIndex={Math.min(startPage - 1, loaded.uris.length - 1)}
+          data={pages}
+          keyExtractor={(_, i) => String(i)}
+          initialScrollIndex={Math.min(startPage - 1, pages.length - 1)}
+          maintainVisibleContentPosition={{ minIndexForVisible: 0 }}
           getItemLayout={(_, i) => ({ length: heights[i], offset: offsets[i], index: i })}
           onScroll={onScroll}
           scrollEventThrottle={32}
           windowSize={7}
           maxToRenderPerBatch={4}
           showsVerticalScrollIndicator={false}
-          renderItem={({ item, index }) => (
-            <Pressable onPress={() => setChrome((v) => !v)}>
-              <Image
-                source={{ uri: item }}
-                style={{ width, height: heights[index] }}
-                contentFit="fill"
-                transition={0}
-                recyclingKey={item}
-              />
-            </Pressable>
-          )}
+          renderItem={({ item, index }) =>
+            item.uri ? (
+              <Pressable onPress={() => setChrome((v) => !v)}>
+                <Image
+                  source={{ uri: item.uri }}
+                  style={{ width, height: heights[index] }}
+                  contentFit="fill"
+                  transition={0}
+                  recyclingKey={item.uri}
+                />
+              </Pressable>
+            ) : (
+              <Pressable
+                style={[styles.placeholder, { width, height: heights[index] }]}
+                onPress={() => (item.failed ? retryPage(index) : setChrome((v) => !v))}
+              >
+                {item.failed ? (
+                  <>
+                    <Ionicons name="refresh" size={26} color="#9A9AA4" />
+                    <Text style={styles.dim}>{`Couldn't load page ${index + 1}. Tap to retry.`}</Text>
+                  </>
+                ) : (
+                  <ActivityIndicator color={ACCENT} />
+                )}
+              </Pressable>
+            )
+          }
           ListFooterComponent={
             <View style={styles.footer}>
               {next ? (
@@ -343,7 +385,7 @@ An admin reviews it before anyone else sees it.`, [
         </View>
       )}
 
-      {loaded && atEnd && next ? (
+      {pages && atEnd && next ? (
         <View style={[styles.endWrap, { bottom: chrome ? insets.bottom + 150 : insets.bottom + 32 }]} pointerEvents="box-none">
           <Pressable style={styles.pill} onPress={() => goTo(next)}>
             <Text style={styles.pillText}>Next: {next.name}</Text>
@@ -454,6 +496,7 @@ const styles = StyleSheet.create({
   center: { alignItems: 'center', justifyContent: 'center', gap: 12, padding: 24 },
   dim: { color: '#9A9AA4', textAlign: 'center' },
   footer: { alignItems: 'center', paddingVertical: 48 },
+  placeholder: { alignItems: 'center', justifyContent: 'center', gap: 8 },
   pill: {
     flexDirection: 'row',
     alignItems: 'center',
