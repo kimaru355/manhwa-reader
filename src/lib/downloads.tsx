@@ -2,15 +2,17 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as FS from 'expo-file-system/legacy';
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 
+import { friendly } from './errors';
 import { chapterDir, downloadFile, fetchPages, removeDir, seriesDir } from './files';
 import { getSource, imageHeaders } from './sources';
 import type { Chapter, DownloadedChapter, DownloadedSeries, Series } from './types';
 
-const KEY = 'downloads1';
+const KEYS = { items: 'downloads1', queue: 'downloadQueue1', started: 'downloadStarted1' } as const;
 
 export type Job = {
   series: Series;
   chapter: Chapter;
+  /** `queued` also covers paused: a queued job only runs while its title is started. */
   state: 'queued' | 'active' | 'error';
   done: number;
   total: number;
@@ -18,15 +20,27 @@ export type Job = {
 };
 
 const jobKey = (seriesKey: string, chapterId: string) => `${seriesKey}|${chapterId}`;
+const keyOf = (j: Job) => jobKey(j.series.key, j.chapter.id);
 
 type DownloadsContext = {
   items: DownloadedSeries[];
-  jobs: Record<string, Job>;
+  /** Everything waiting, running or failed, in the order it was added. */
+  queue: Job[];
+  /** Titles allowed to download right now. Others wait until started. */
+  started: string[];
   getDownloaded: (seriesKey: string) => DownloadedSeries | undefined;
   getChapter: (seriesKey: string, chapterId: string) => DownloadedChapter | undefined;
   getJob: (seriesKey: string, chapterId: string) => Job | undefined;
-  download: (series: Series, chapters: Chapter[]) => void;
+  /** Adds chapters to the list. Nothing downloads until start() is called. Returns how many were new. */
+  enqueue: (series: Series, chapters: Chapter[]) => number;
+  /** Starts one title, or every title in the queue. */
+  start: (seriesKey?: string) => void;
+  /** Pauses one title, or everything. Progress is kept and can be resumed. */
+  stop: (seriesKey?: string) => void;
+  /** Removes a chapter from the list (deleting what was partly downloaded). */
   cancel: (seriesKey: string, chapterId: string) => void;
+  cancelSeries: (seriesKey: string) => void;
+  retry: (seriesKey: string, chapterId: string) => void;
   removeChapter: (seriesKey: string, chapterId: string) => void;
   removeSeries: (seriesKey: string) => void;
 };
@@ -41,37 +55,42 @@ export const useDownloads = () => {
 
 export function DownloadsProvider({ children }: { children: ReactNode }) {
   const [items, setItems] = useState<DownloadedSeries[]>([]);
-  const [jobs, setJobs] = useState<Record<string, Job>>({});
+  const [queue, setQueue] = useState<Job[]>([]);
+  const [started, setStarted] = useState<string[]>([]);
   const itemsRef = useRef(items);
-  const queue = useRef<Job[]>([]);
+  const queueRef = useRef(queue);
+  const startedRef = useRef(started);
   const running = useRef(false);
-  const cancelled = useRef(new Set<string>());
+  const removed = useRef(new Set<string>());
 
-  const commit = useCallback((next: DownloadedSeries[]) => {
+  const commitItems = useCallback((next: DownloadedSeries[]) => {
     itemsRef.current = next;
     setItems(next);
-    AsyncStorage.setItem(KEY, JSON.stringify(next)).catch(() => {});
+    AsyncStorage.setItem(KEYS.items, JSON.stringify(next)).catch(() => {});
   }, []);
 
-  useEffect(() => {
-    AsyncStorage.getItem(KEY)
-      .then((raw) => {
-        if (!raw) return;
-        const parsed = JSON.parse(raw) as DownloadedSeries[];
-        itemsRef.current = parsed;
-        setItems(parsed);
-      })
-      .catch(() => {});
+  /** Applies a change to the queue; `persist` is skipped for page-by-page progress. */
+  const updateQueue = useCallback((fn: (q: Job[]) => Job[], persist = true) => {
+    const next = fn(queueRef.current);
+    queueRef.current = next;
+    setQueue(next);
+    if (persist) {
+      const lean = next.map((j) => ({ series: j.series, chapter: j.chapter, state: 'queued', done: 0, total: 0 }));
+      AsyncStorage.setItem(KEYS.queue, JSON.stringify(lean)).catch(() => {});
+    }
   }, []);
 
-  const patchJob = useCallback((k: string, patch: Partial<Job> | null) => {
-    setJobs((prev) => {
-      const next = { ...prev };
-      if (patch === null) delete next[k];
-      else if (next[k]) next[k] = { ...next[k], ...patch };
-      return next;
-    });
+  const setStartedKeys = useCallback((fn: (s: string[]) => string[]) => {
+    const next = fn(startedRef.current);
+    startedRef.current = next;
+    setStarted(next);
+    AsyncStorage.setItem(KEYS.started, JSON.stringify(next)).catch(() => {});
   }, []);
+
+  const patch = useCallback(
+    (k: string, p: Partial<Job>, persist = false) => updateQueue((q) => q.map((j) => (keyOf(j) === k ? { ...j, ...p } : j)), persist),
+    [updateQueue],
+  );
 
   const saveCover = async (series: Series) => {
     const existing = itemsRef.current.find((i) => i.series.key === series.key)?.cover;
@@ -89,135 +108,189 @@ export function DownloadsProvider({ children }: { children: ReactNode }) {
   };
 
   const run = async (job: Job) => {
-    const k = jobKey(job.series.key, job.chapter.id);
+    const k = keyOf(job);
     const source = getSource(job.series.source);
-    if (!source) return patchJob(k, null);
-    patchJob(k, { state: 'active' });
+    if (!source) return updateQueue((q) => q.filter((j) => keyOf(j) !== k));
+    patch(k, { state: 'active', error: undefined });
+    // Stops at the next page when the title is paused or the chapter removed; files already saved are kept.
+    const shouldStop = () => removed.current.has(k) || !startedRef.current.includes(job.series.key);
     try {
       const urls = await source.pages(job.series, job.chapter);
+      if (shouldStop()) throw new Error('Cancelled');
       const dir = chapterDir(job.series.key, job.chapter.id, true);
-      const files = await fetchPages(
-        urls,
-        dir,
-        source.imageHeaders,
-        (done, total) => patchJob(k, { done, total }),
-        () => cancelled.current.has(k),
-      );
+      const files = await fetchPages(urls, dir, source.imageHeaders, (done, total) => patch(k, { done, total }), shouldStop);
       const cover = await saveCover(job.series);
       const saved: DownloadedChapter = { ...job.chapter, files, ts: Date.now() };
       const list = itemsRef.current;
       const found = list.find((i) => i.series.key === job.series.key);
-      const next = found
-        ? list.map((i) =>
-            i === found
-              ? {
-                  ...i,
-                  cover: cover ?? i.cover,
-                  chapters: [...i.chapters.filter((c) => c.id !== saved.id), saved],
-                }
-              : i,
-          )
-        : [{ series: job.series, cover, chapters: [saved] }, ...list];
-      commit(next);
-      patchJob(k, null);
+      commitItems(
+        found
+          ? list.map((i) =>
+              i === found
+                ? { ...i, cover: cover ?? i.cover, chapters: [...i.chapters.filter((c) => c.id !== saved.id), saved] }
+                : i,
+            )
+          : [{ series: job.series, cover, chapters: [saved] }, ...list],
+      );
+      updateQueue((q) => q.filter((j) => keyOf(j) !== k));
     } catch (e) {
-      if (cancelled.current.has(k)) {
+      if (removed.current.has(k)) {
         await removeDir(chapterDir(job.series.key, job.chapter.id, true));
-        patchJob(k, null);
+        updateQueue((q) => q.filter((j) => keyOf(j) !== k));
+      } else if (!startedRef.current.includes(job.series.key)) {
+        patch(k, { state: 'queued' });
       } else {
-        patchJob(k, { state: 'error', error: String((e as Error)?.message ?? e) });
+        patch(k, { state: 'error', error: friendly(e) });
       }
     } finally {
-      cancelled.current.delete(k);
+      removed.current.delete(k);
     }
   };
 
-  const pump = async () => {
+  const pump = useCallback(async () => {
     if (running.current) return;
     running.current = true;
     try {
-      while (queue.current.length) {
-        const job = queue.current.shift()!;
-        if (cancelled.current.has(jobKey(job.series.key, job.chapter.id))) {
-          cancelled.current.delete(jobKey(job.series.key, job.chapter.id));
-          patchJob(jobKey(job.series.key, job.chapter.id), null);
-          continue;
-        }
+      for (;;) {
+        const job = queueRef.current.find((j) => j.state === 'queued' && startedRef.current.includes(j.series.key));
+        if (!job) break;
         await run(job);
       }
     } finally {
       running.current = false;
     }
-  };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
-  const download = (series: Series, chapters: Chapter[]) => {
-    const fresh: Job[] = [];
-    for (const chapter of chapters) {
-      const k = jobKey(series.key, chapter.id);
-      const have = itemsRef.current.find((i) => i.series.key === series.key)?.chapters.some((c) => c.id === chapter.id);
-      const queued = queue.current.some((j) => jobKey(j.series.key, j.chapter.id) === k);
-      if (have || queued) continue;
-      fresh.push({ series, chapter, state: 'queued', done: 0, total: 0 });
-    }
-    if (!fresh.length) return;
-    setJobs((prev) => {
-      const next = { ...prev };
-      for (const j of fresh) next[jobKey(j.series.key, j.chapter.id)] = j;
-      return next;
-    });
-    queue.current.push(...fresh);
-    pump();
-  };
+  // Restore everything, then pick up where an interrupted download stopped.
+  useEffect(() => {
+    (async () => {
+      const read = async <T,>(key: string, fallback: T): Promise<T> => {
+        try {
+          const raw = await AsyncStorage.getItem(key);
+          return raw ? (JSON.parse(raw) as T) : fallback;
+        } catch {
+          return fallback;
+        }
+      };
+      const [saved, q, s] = await Promise.all([
+        read<DownloadedSeries[]>(KEYS.items, []),
+        read<Job[]>(KEYS.queue, []),
+        read<string[]>(KEYS.started, []),
+      ]);
+      itemsRef.current = saved;
+      setItems(saved);
+      // Chapters that finished while the queue was being saved are not downloaded twice.
+      const pending = q.filter(
+        (j) => !saved.find((i) => i.series.key === j.series.key)?.chapters.some((c) => c.id === j.chapter.id),
+      );
+      queueRef.current = pending;
+      setQueue(pending);
+      const live = s.filter((key) => pending.some((j) => j.series.key === key));
+      startedRef.current = live;
+      setStarted(live);
+      pump();
+    })();
+  }, [pump]);
 
-  const cancel = (seriesKey: string, chapterId: string) => {
-    const k = jobKey(seriesKey, chapterId);
-    const queued = queue.current.findIndex((j) => jobKey(j.series.key, j.chapter.id) === k);
-    if (queued >= 0) {
-      queue.current.splice(queued, 1);
-      patchJob(k, null);
-      return;
-    }
-    // Active jobs stop at the next page; failed ones are just dismissed.
-    cancelled.current.add(k);
-    setJobs((prev) => {
-      if (prev[k]?.state !== 'error') return prev;
-      cancelled.current.delete(k);
-      const next = { ...prev };
-      delete next[k];
-      return next;
-    });
-  };
+  const enqueue = useCallback(
+    (series: Series, chapters: Chapter[]) => {
+      const have = new Set(itemsRef.current.find((i) => i.series.key === series.key)?.chapters.map((c) => c.id));
+      const queued = new Set(queueRef.current.filter((j) => j.series.key === series.key).map((j) => j.chapter.id));
+      const fresh: Job[] = chapters
+        .filter((c) => !have.has(c.id) && !queued.has(c.id))
+        .map((chapter) => ({ series, chapter, state: 'queued', done: 0, total: 0 }));
+      if (fresh.length) updateQueue((q) => [...q, ...fresh]);
+      return fresh.length;
+    },
+    [updateQueue],
+  );
 
-  const removeChapter = (seriesKey: string, chapterId: string) => {
-    removeDir(chapterDir(seriesKey, chapterId, true));
-    const next = itemsRef.current
-      .map((i) => (i.series.key === seriesKey ? { ...i, chapters: i.chapters.filter((c) => c.id !== chapterId) } : i))
-      .filter((i) => i.chapters.length > 0);
-    if (!next.some((i) => i.series.key === seriesKey)) removeDir(seriesDir(seriesKey));
-    commit(next);
-  };
+  const start = useCallback(
+    (seriesKey?: string) => {
+      const keys = seriesKey ? [seriesKey] : [...new Set(queueRef.current.map((j) => j.series.key))];
+      // Failed chapters are tried again when their title is started.
+      updateQueue((q) => q.map((j) => (keys.includes(j.series.key) && j.state === 'error' ? { ...j, state: 'queued', error: undefined } : j)));
+      setStartedKeys((s) => [...new Set([...s, ...keys])]);
+      pump();
+    },
+    [pump, setStartedKeys, updateQueue],
+  );
 
-  const removeSeries = (seriesKey: string) => {
-    removeDir(seriesDir(seriesKey));
-    commit(itemsRef.current.filter((i) => i.series.key !== seriesKey));
-  };
+  const stop = useCallback(
+    (seriesKey?: string) => setStartedKeys((s) => (seriesKey ? s.filter((k) => k !== seriesKey) : [])),
+    [setStartedKeys],
+  );
+
+  const dropJob = useCallback(
+    (k: string) => {
+      const job = queueRef.current.find((j) => keyOf(j) === k);
+      if (!job) return;
+      if (job.state === 'active') removed.current.add(k);
+      else removeDir(chapterDir(job.series.key, job.chapter.id, true));
+      if (job.state !== 'active') updateQueue((q) => q.filter((j) => keyOf(j) !== k));
+    },
+    [updateQueue],
+  );
+
+  const cancel = useCallback((seriesKey: string, chapterId: string) => dropJob(jobKey(seriesKey, chapterId)), [dropJob]);
+
+  const cancelSeries = useCallback(
+    (seriesKey: string) => {
+      for (const j of queueRef.current.filter((x) => x.series.key === seriesKey)) dropJob(keyOf(j));
+      setStartedKeys((s) => s.filter((k) => k !== seriesKey));
+    },
+    [dropJob, setStartedKeys],
+  );
+
+  const retry = useCallback(
+    (seriesKey: string, chapterId: string) => {
+      patch(jobKey(seriesKey, chapterId), { state: 'queued', error: undefined }, true);
+      start(seriesKey);
+    },
+    [patch, start],
+  );
+
+  const removeChapter = useCallback(
+    (seriesKey: string, chapterId: string) => {
+      removeDir(chapterDir(seriesKey, chapterId, true));
+      const next = itemsRef.current
+        .map((i) => (i.series.key === seriesKey ? { ...i, chapters: i.chapters.filter((c) => c.id !== chapterId) } : i))
+        .filter((i) => i.chapters.length > 0);
+      if (!next.some((i) => i.series.key === seriesKey)) removeDir(seriesDir(seriesKey));
+      commitItems(next);
+    },
+    [commitItems],
+  );
+
+  const removeSeries = useCallback(
+    (seriesKey: string) => {
+      removeDir(seriesDir(seriesKey));
+      commitItems(itemsRef.current.filter((i) => i.series.key !== seriesKey));
+    },
+    [commitItems],
+  );
 
   const value = useMemo<DownloadsContext>(() => {
     const byKey = new Map(items.map((i) => [i.series.key, i]));
+    const jobs = new Map(queue.map((j) => [keyOf(j), j]));
     return {
       items,
-      jobs,
+      queue,
+      started,
       getDownloaded: (k) => byKey.get(k),
       getChapter: (k, id) => byKey.get(k)?.chapters.find((c) => c.id === id),
-      getJob: (k, id) => jobs[jobKey(k, id)],
-      download,
+      getJob: (k, id) => jobs.get(jobKey(k, id)),
+      enqueue,
+      start,
+      stop,
       cancel,
+      cancelSeries,
+      retry,
       removeChapter,
       removeSeries,
     };
-    // The handlers only touch refs and stable setters.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [items, jobs]);
+  }, [items, queue, started, enqueue, start, stop, cancel, cancelSeries, retry, removeChapter, removeSeries]);
 
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>;
 }

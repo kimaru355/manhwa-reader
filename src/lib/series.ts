@@ -2,7 +2,9 @@ import { router } from 'expo-router';
 import { useCallback, useEffect, useState } from 'react';
 import { Linking } from 'react-native';
 
+import { fetchCommunityBookmarks, type CommunityBookmark } from './community';
 import { useDownloads } from './downloads';
+import { friendly, toastError } from './errors';
 import { getSource } from './sources';
 import type { Chapter, Series } from './types';
 import { naturalCompare } from './util';
@@ -60,7 +62,11 @@ export function useChapters(series: Series | null) {
         cache.set(series.key, list);
         if (alive) setOnline(list);
       })
-      .catch((e) => alive && setError(String(e?.message ?? e)))
+      .catch((e) => {
+        if (!alive) return;
+        setError(friendly(e));
+        toastError(e);
+      })
       .finally(() => alive && setLoading(false));
     return () => {
       alive = false;
@@ -78,4 +84,21 @@ export function useChapters(series: Series | null) {
 
   const reload = useCallback(() => setAttempt((n) => n + 1), []);
   return { chapters, loading, error, reload, offline: !online };
+}
+
+/** Approved community bookmarks for a title (empty while loading, offline, or if there are none). */
+export function useCommunityBookmarks(series: Series | null): CommunityBookmark[] {
+  const [items, setItems] = useState<CommunityBookmark[]>([]);
+  const key = series?.key;
+  useEffect(() => {
+    if (!series) return;
+    let alive = true;
+    fetchCommunityBookmarks(series).then((list) => alive && setItems(list));
+    return () => {
+      alive = false;
+    };
+    // `series` is identified by its key.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [key]);
+  return items;
 }

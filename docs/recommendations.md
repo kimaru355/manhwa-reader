@@ -1,8 +1,10 @@
 # Recommendations file
 
-Home is built from one JSON file. Host it anywhere that serves raw JSON (for example a GitHub raw URL), then paste
-the link in **Settings → Author recommendations**, or set `DEFAULT_RECS_URL` in `src/lib/recs.tsx` to ship it as the
-default. The app caches the last good copy. Without a link it uses `src/data/recommendations.json`.
+Home is built from one JSON file. The app fetches it from `DEFAULT_RECS_URL` in `src/lib/recs.tsx`
+(`https://manhwa-reader.kimaru355.co.ke/recommendations.json`) on launch and on pull-to-refresh, and caches the last
+good copy. A different link can be pasted in **Settings → Author recommendations**. If nothing has been fetched yet
+it falls back to `src/data/recommendations.json`, which doubles as a sample of every field: copy it, replace the
+`SAMPLE` entries with real ones, and upload it to the URL above.
 
 ```json
 {

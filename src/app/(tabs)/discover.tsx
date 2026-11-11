@@ -5,6 +5,7 @@ import { ActivityIndicator, Pressable, StyleSheet, Text, TextInput, View } from 
 import { EmptyState } from '../../components/EmptyState';
 import { Segmented } from '../../components/Segmented';
 import { SeriesGrid } from '../../components/SeriesGrid';
+import { friendly, toastError } from '../../lib/errors';
 import { useRecs } from '../../lib/recs';
 import { DEFAULT_SOURCES, getSource } from '../../lib/sources';
 import { useTheme } from '../../lib/theme';
@@ -47,7 +48,10 @@ function useBrowse(source: SourceId | undefined, query: string) {
         });
         setHasMore(res.hasMore);
       } catch (e) {
-        if (mine === run.current) setError(String((e as Error)?.message ?? e));
+        if (mine === run.current) {
+          setError(friendly(e));
+          toastError(e);
+        }
       } finally {
         if (mine === run.current) {
           busy.current = false;

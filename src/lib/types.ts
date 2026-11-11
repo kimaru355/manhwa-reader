@@ -41,6 +41,8 @@ export type Bookmark = {
   page: number;
   note: string;
   ts: number;
+  /** Last edit (ms); used to settle conflicts when syncing. Missing means `ts`. */
+  updatedAt?: number;
 };
 
 /** A bookmark written by the author in the recommendations file. */

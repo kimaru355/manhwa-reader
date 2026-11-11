@@ -2,6 +2,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { useMemo, useState } from 'react';
 import { FlatList, Pressable, RefreshControl, StyleSheet, Text, View } from 'react-native';
 
+import { CommunityFeed } from '../../components/CommunityFeed';
 import { Cover } from '../../components/Cover';
 import { EmptyState } from '../../components/EmptyState';
 import { Segmented } from '../../components/Segmented';
@@ -10,7 +11,7 @@ import { openSeries } from '../../lib/series';
 import { useTheme } from '../../lib/theme';
 import type { Category, Series, Tier } from '../../lib/types';
 
-type Top = 'home' | 'interesting';
+type Top = 'home' | 'interesting' | 'community';
 
 const COLUMNS = 3;
 const CATEGORIES: { value: Category; label: string }[] = [
@@ -52,10 +53,15 @@ export default function Home() {
         options={[
           { value: 'home', label: 'Home' },
           { value: 'interesting', label: 'Interesting' },
+          { value: 'community', label: 'Community' },
         ]}
       />
       {top === 'home' ? <Segmented value={category} onChange={setCategory} options={CATEGORIES} /> : null}
 
+      {top === 'community' ? (
+        <CommunityFeed />
+      ) : (
+        <>
       {error ? <Text style={[styles.error, { color: t.danger }]}>{error}</Text> : null}
 
       <FlatList
@@ -102,6 +108,8 @@ export default function Home() {
           )
         }
       />
+        </>
+      )}
     </View>
   );
 }

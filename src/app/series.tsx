@@ -1,15 +1,17 @@
 import { Ionicons } from '@expo/vector-icons';
 import { router, useLocalSearchParams } from 'expo-router';
 import { useMemo, useState } from 'react';
-import { ActivityIndicator, Alert, FlatList, Pressable, StyleSheet, Text, View } from 'react-native';
+import { ActivityIndicator, Alert, FlatList, Platform, Pressable, StyleSheet, Text, ToastAndroid, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { Cover } from '../components/Cover';
+import { RecommendSheet } from '../components/RecommendSheet';
 import { EmptyState } from '../components/EmptyState';
+import { useAccount } from '../lib/account';
 import { useDownloads } from '../lib/downloads';
 import { useLibrary } from '../lib/library';
 import { TIER_LABEL, useRecs } from '../lib/recs';
-import { openReader, parseRef, useChapters } from '../lib/series';
+import { openReader, parseRef, useChapters, useCommunityBookmarks } from '../lib/series';
 import { getSource } from '../lib/sources';
 import { useTheme } from '../lib/theme';
 import type { Bookmark } from '../lib/types';
@@ -24,6 +26,9 @@ export default function SeriesDetail() {
   const dl = useDownloads();
   const { chapters, loading, error, reload, offline } = useChapters(series);
   const [newestFirst, setNewestFirst] = useState(false);
+  const [recommendOpen, setRecommendOpen] = useState(false);
+  const account = useAccount();
+  const communityMarks = useCommunityBookmarks(series);
 
   if (!series) {
     return (
@@ -45,10 +50,15 @@ export default function SeriesDetail() {
     authorByChapter.set(b.chapterId, [...(authorByChapter.get(b.chapterId) ?? []), b]);
   }
 
+  const communityByChapter = new Map<string, typeof communityMarks>();
+  for (const b of communityMarks) communityByChapter.set(b.chapterId, [...(communityByChapter.get(b.chapterId) ?? []), b]);
+
   const indexed = chapters.map((c, i) => ({ c, i }));
   const rows = newestFirst ? [...indexed].reverse() : indexed;
   const savedCount = dl.getDownloaded(series.key)?.chapters.length ?? 0;
   const pending = chapters.filter((c) => !dl.getChapter(series.key, c.id) && !dl.getJob(series.key, c.id));
+  const waiting = dl.queue.filter((j) => j.series.key === series.key);
+  const running = dl.started.includes(series.key);
   const sourceName = getSource(series.source)?.name ?? series.source;
 
   const startReading = () => {
@@ -57,18 +67,29 @@ export default function SeriesDetail() {
     else openReader(series, chapters[0].id);
   };
 
+  const addToDownloads = (list: typeof chapters) => {
+    const n = dl.enqueue(series, list);
+    if (n && Platform.OS === 'android') {
+      ToastAndroid.show(`${n} chapter${n === 1 ? '' : 's'} added to Downloads`, ToastAndroid.SHORT);
+    }
+  };
+
   const downloadAll = () => {
     if (!pending.length) return;
-    Alert.alert(
-      `Download ${pending.length} chapter${pending.length === 1 ? '' : 's'}?`,
-      pending.length > 20
-        ? 'That is a lot of images. It uses mobile data and storage; consider doing it on Wi-Fi.'
-        : undefined,
-      [
-        { text: 'Cancel', style: 'cancel' },
-        { text: 'Download', onPress: () => dl.download(series, pending) },
-      ],
-    );
+    Alert.alert(`Download all ${pending.length} chapter${pending.length === 1 ? '' : 's'}?`, undefined, [
+      { text: 'Cancel', style: 'cancel' },
+      { text: 'Yes', onPress: () => addToDownloads(pending) },
+    ]);
+  };
+
+  const openRecommend = () => {
+    if (account.user) setRecommendOpen(true);
+    else {
+      Alert.alert('Sign in to recommend', 'Recommending shares a title with others. An account is only needed for this, not for reading.', [
+        { text: 'Not now', style: 'cancel' },
+        { text: 'Sign in', onPress: () => router.push('/account') },
+      ]);
+    }
   };
 
   const confirmDeleteChapter = (id: string, name: string) =>
@@ -122,6 +143,7 @@ export default function SeriesDetail() {
                 <Text style={{ color: t.sub }}>
                   {sourceName}
                   {chapters.length ? ` · ${chapters.length} chapters` : ''}
+                  {communityMarks.length ? ` · ${communityMarks.length} community bookmark${communityMarks.length === 1 ? '' : 's'}` : ''}
                 </Text>
                 {rec ? (
                   <View style={[styles.tier, { backgroundColor: t.card }]}>
@@ -165,6 +187,17 @@ export default function SeriesDetail() {
                   <Ionicons name="download-outline" size={18} color={t.text} />
                   <Text style={{ color: t.text }}>{pending.length ? 'Download all' : 'All downloaded'}</Text>
                 </Pressable>
+                {waiting.length ? (
+                  <Pressable
+                    onPress={() => (running ? dl.stop(series.key) : dl.start(series.key))}
+                    style={[styles.action, { borderColor: t.accent }]}
+                  >
+                    <Ionicons name={running ? 'pause' : 'play'} size={18} color={t.accent} />
+                    <Text style={{ color: t.accent }}>
+                      {running ? 'Pause' : 'Start'} ({waiting.length})
+                    </Text>
+                  </Pressable>
+                ) : null}
                 {savedCount ? (
                   <Pressable
                     onPress={() =>
@@ -180,6 +213,13 @@ export default function SeriesDetail() {
                   </Pressable>
                 ) : null}
               </View>
+            ) : null}
+
+            {account.enabled ? (
+              <Pressable onPress={openRecommend} style={[styles.action, { borderColor: t.border, marginHorizontal: 16, marginTop: 10 }]}>
+                <Ionicons name="sparkles-outline" size={18} color={t.text} />
+                <Text style={{ color: t.text }}>Recommend this title</Text>
+              </Pressable>
             ) : null}
 
             {offline && chapters.length ? (
@@ -200,7 +240,10 @@ export default function SeriesDetail() {
           const read = resumeIdx >= 0 && i < resumeIdx;
           const marks = marksByChapter.get(c.id) ?? [];
           const authorMarks = authorByChapter.get(c.id) ?? [];
-          const notes = [...authorMarks.map((b) => b?.note), ...marks.map((b) => b.note)].filter(Boolean).join(' · ');
+          const crowd = communityByChapter.get(c.id) ?? [];
+          const notes = [...authorMarks.map((b) => b?.note), ...crowd.map((b) => b.note), ...marks.map((b) => b.note)]
+            .filter(Boolean)
+            .join(' · ');
           const saved = dl.getChapter(series.key, c.id);
           const job = dl.getJob(series.key, c.id);
           return (
@@ -220,6 +263,7 @@ export default function SeriesDetail() {
                 ) : null}
               </View>
               {authorMarks.length ? <Ionicons name="sparkles" size={16} color={t.accent} /> : null}
+              {crowd.length ? <Ionicons name="people" size={16} color={t.accent} /> : null}
               {marks.length ? <Ionicons name="bookmark" size={16} color={t.accent} /> : null}
               {current ? (
                 <Text style={{ color: t.accent, fontSize: 12 }}>
@@ -231,20 +275,24 @@ export default function SeriesDetail() {
               {saved ? (
                 <Ionicons name="checkmark-done-circle" size={22} color={t.accent} />
               ) : job ? (
-                <Pressable hitSlop={10} onPress={() => dl.cancel(series.key, c.id)} style={styles.jobBtn}>
+                <Pressable
+                  hitSlop={10}
+                  onPress={() => (job.state === 'error' ? dl.retry(series.key, c.id) : dl.cancel(series.key, c.id))}
+                  style={styles.jobBtn}
+                >
                   {job.state === 'error' ? (
                     <Ionicons name="refresh-circle" size={22} color={t.danger} />
-                  ) : (
+                  ) : job.state === 'active' ? (
                     <>
                       <ActivityIndicator size="small" color={t.accent} />
-                      <Text style={{ color: t.sub, fontSize: 11 }}>
-                        {job.state === 'queued' ? 'wait' : job.total ? `${job.done}/${job.total}` : '…'}
-                      </Text>
+                      <Text style={{ color: t.sub, fontSize: 11 }}>{job.total ? `${job.done}/${job.total}` : '…'}</Text>
                     </>
+                  ) : (
+                    <Ionicons name="time-outline" size={22} color={t.sub} />
                   )}
                 </Pressable>
               ) : (
-                <Pressable hitSlop={10} onPress={() => dl.download(series, [c])}>
+                <Pressable hitSlop={10} onPress={() => addToDownloads([c])}>
                   <Ionicons name="download-outline" size={22} color={t.sub} />
                 </Pressable>
               )}
@@ -252,6 +300,7 @@ export default function SeriesDetail() {
           );
         }}
       />
+      <RecommendSheet series={series} visible={recommendOpen} onClose={() => setRecommendOpen(false)} />
     </View>
   );
 }

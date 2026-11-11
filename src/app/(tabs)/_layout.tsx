@@ -23,7 +23,7 @@ export default function TabsLayout() {
         headerShadowVisible: false,
         headerTitleStyle: { color: t.text, fontWeight: '700' },
         headerRight: () => (
-          <Pressable hitSlop={10} style={{ marginRight: 16 }} onPress={() => router.navigate('/settings')}>
+          <Pressable hitSlop={10} style={{ marginRight: 16 }} onPress={() => router.push('/settings')}>
             <Ionicons name="settings-outline" size={22} color={t.text} />
           </Pressable>
         ),
@@ -40,8 +40,6 @@ export default function TabsLayout() {
       <Tabs.Screen name="favorites" options={tab('Favorites', 'heart', 'heart-outline')} />
       <Tabs.Screen name="wishlist" options={tab('Wishlist', 'star', 'star-outline')} />
       <Tabs.Screen name="recent" options={tab('Recent', 'time', 'time-outline')} />
-      {/* Reached from the gear in the header; kept out of the tab bar. */}
-      <Tabs.Screen name="settings" options={{ title: 'Settings', href: null, headerRight: () => null }} />
     </Tabs>
   );
 }

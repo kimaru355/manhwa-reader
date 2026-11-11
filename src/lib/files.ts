@@ -1,5 +1,6 @@
 import * as FS from 'expo-file-system/legacy';
 
+import { FriendlyError, friendly } from './errors';
 import { hash, mapLimit } from './util';
 
 /** Chapters the user chose to keep. */
@@ -32,7 +33,7 @@ export async function downloadFile(url: string, dest: string, headers: Record<st
     await new Promise((r) => setTimeout(r, 400 * (attempt + 1)));
   }
   await FS.deleteAsync(dest, { idempotent: true }).catch(() => {});
-  throw last instanceof Error ? last : new Error('Download failed');
+  throw new FriendlyError(friendly(last));
 }
 
 /**
@@ -58,10 +59,25 @@ export async function fetchPages(
   return names;
 }
 
+const DONE = '_done.json';
+
+/** File names of a chapter that finished downloading into `dir`, or null if it is not (fully) there. */
+export async function readDone(dir: string): Promise<string[] | null> {
+  try {
+    const names = JSON.parse(await FS.readAsStringAsync(`${dir}${DONE}`)) as string[];
+    return Array.isArray(names) && names.length ? names : null;
+  } catch {
+    return null;
+  }
+}
+
+export const markDone = (dir: string, names: string[]) =>
+  FS.writeAsStringAsync(`${dir}${DONE}`, JSON.stringify(names)).catch(() => {});
+
 export const removeDir = (dir: string) => FS.deleteAsync(dir, { idempotent: true }).catch(() => {});
 
 /** Keeps only the few most recently opened online chapters. */
-export async function pruneTemp(keep = 3) {
+export async function pruneTemp(keep = 24) {
   try {
     const series = await FS.readDirectoryAsync(TEMP);
     const dirs: { path: string; time: number }[] = [];

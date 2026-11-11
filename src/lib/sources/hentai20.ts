@@ -1,3 +1,4 @@
+import { FriendlyError } from '../errors';
 import type { Chapter, Series } from '../types';
 import { decodeHtml, getText } from './http';
 import type { Source } from './types';
@@ -41,7 +42,7 @@ export const hentai20: Source = {
   },
 
   async pages(_series, chapter) {
-    if (!chapter.url) throw new Error('Missing chapter link');
+    if (!chapter.url) throw new FriendlyError("This chapter can't be opened.");
     const html = await getText(chapter.url);
     const json = html.match(/ts_reader\.run\((\{[\s\S]*?\})\);/)?.[1];
     let images: string[] = [];
@@ -51,7 +52,7 @@ export const hentai20: Source = {
       const raw = json?.match(/"images":\[([^\]]*)\]/)?.[1] ?? '';
       images = [...raw.matchAll(/"([^"]+)"/g)].map((m) => m[1].replace(/\\\//g, '/'));
     }
-    if (!images.length) throw new Error('No pages found for this chapter.');
+    if (!images.length) throw new FriendlyError('No pages were found for this chapter.');
     return images;
   },
 };

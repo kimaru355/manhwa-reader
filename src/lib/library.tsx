@@ -48,6 +48,8 @@ type LibraryContext = {
   toggleFavorite: (s: Series) => void;
   isWishlisted: (key: string) => boolean;
   toggleWishlist: (s: Series) => void;
+  /** Every bookmark, newest first. */
+  bookmarks: Bookmark[];
   /** Bookmarks of one title, newest first. */
   getBookmarks: (seriesKey: string) => Bookmark[];
   addBookmark: (b: Omit<Bookmark, 'id' | 'ts'>) => void;
@@ -68,6 +70,14 @@ type LibraryContext = {
   exportBackup: () => Promise<string | null>;
   /** Replaces the app's data with a snapshot (from a backup file). */
   restoreSnapshot: (s: Snapshot) => void;
+  /** Applies changes that came from the account's server on top of whatever is on the device now. */
+  applySync: (patch: SyncPatch) => void;
+};
+
+export type SyncPatch = {
+  favorites: { put: Series[]; remove: string[] };
+  wishlist: { put: Series[]; remove: string[] };
+  bookmarks: { put: Bookmark[]; remove: string[] };
 };
 
 const Ctx = createContext<LibraryContext | null>(null);
@@ -158,7 +168,10 @@ export function LibraryProvider({ children }: { children: ReactNode }) {
   const addBookmark = useCallback((b: Omit<Bookmark, 'id' | 'ts'>) => {
     const ts = Date.now();
     setBookmarks((prev) => {
-      const next = [{ ...b, note: b.note.trim(), id: `${ts}-${Math.random().toString(36).slice(2, 7)}`, ts }, ...prev];
+      const next = [
+        { ...b, note: b.note.trim(), id: `${ts}-${Math.random().toString(36).slice(2, 7)}`, ts, updatedAt: ts },
+        ...prev,
+      ];
       save(KEYS.bookmarks, next);
       return next;
     });
@@ -166,7 +179,7 @@ export function LibraryProvider({ children }: { children: ReactNode }) {
 
   const updateBookmark = useCallback((id: string, note: string) => {
     setBookmarks((prev) => {
-      const next = prev.map((b) => (b.id === id ? { ...b, note: note.trim() } : b));
+      const next = prev.map((b) => (b.id === id ? { ...b, note: note.trim(), updatedAt: Date.now() } : b));
       save(KEYS.bookmarks, next);
       return next;
     });
@@ -215,6 +228,32 @@ export function LibraryProvider({ children }: { children: ReactNode }) {
     save(KEYS.wishlist, s.wishlist);
     save(KEYS.recents, s.recents);
     save(KEYS.bookmarks, s.bookmarks);
+  }, []);
+
+  const applySync = useCallback((patch: SyncPatch) => {
+    const apply = <T,>(list: T[], key: (x: T) => string, p: { put: T[]; remove: string[] }) => {
+      if (!p.put.length && !p.remove.length) return list;
+      const gone = new Set(p.remove);
+      const put = new Map(p.put.map((x) => [key(x), x]));
+      const kept = list.filter((x) => !gone.has(key(x))).map((x) => put.get(key(x)) ?? x);
+      const have = new Set(kept.map(key));
+      return [...kept, ...p.put.filter((x) => !have.has(key(x)))];
+    };
+    setFavorites((prev) => {
+      const next = apply(prev, (s) => s.key, patch.favorites);
+      if (next !== prev) save(KEYS.favorites, next);
+      return next;
+    });
+    setWishlist((prev) => {
+      const next = apply(prev, (s) => s.key, patch.wishlist);
+      if (next !== prev) save(KEYS.wishlist, next);
+      return next;
+    });
+    setBookmarks((prev) => {
+      const next = apply(prev, (b) => b.id, patch.bookmarks);
+      if (next !== prev) save(KEYS.bookmarks, next);
+      return next;
+    });
   }, []);
 
   const pickBackupFolder = useCallback(async () => {
@@ -274,6 +313,7 @@ export function LibraryProvider({ children }: { children: ReactNode }) {
       toggleFavorite,
       isWishlisted: (key) => wishSet.has(key),
       toggleWishlist,
+      bookmarks,
       getBookmarks: (seriesKey) => bookmarks.filter((b) => b.seriesKey === seriesKey),
       addBookmark,
       removeBookmark,
@@ -289,6 +329,7 @@ export function LibraryProvider({ children }: { children: ReactNode }) {
       stopBackup,
       exportBackup,
       restoreSnapshot,
+      applySync,
     };
   }, [
     backupDir,
@@ -299,6 +340,7 @@ export function LibraryProvider({ children }: { children: ReactNode }) {
     stopBackup,
     exportBackup,
     restoreSnapshot,
+    applySync,
     ready,
     favorites,
     recents,

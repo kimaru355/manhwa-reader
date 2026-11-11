@@ -12,10 +12,48 @@
       "source": "mangadex",
       "id": "77bee52c-d2d6-44ad-a33a-1734c1fe696a",
       "title": "The Eminence in Shadow",
+      "cover": "",
       "category": "manga",
       "tier": "all-time",
-      "note": "Sample entry. Replace this file with your own recommendations.",
-      "bookmarks": []
+      "note": "SAMPLE: why you recommend this title. Shown on the title page and under the cover on Home.",
+      "bookmarks": [
+        {
+          "chapterId": "3c652754-fbf7-4465-be54-f61e50eadc5a",
+          "chapterName": "Ch. 1",
+          "page": 1,
+          "note": "SAMPLE: author bookmark. chapterId is the MangaDex chapter UUID; page is the image number (1-based)."
+        },
+        {
+          "chapterId": "162146ad-ce1f-432e-972e-4fc3e00ea059",
+          "chapterName": "Ch. 2",
+          "page": 12,
+          "note": "SAMPLE: a second bookmark in another chapter."
+        }
+      ]
+    },
+    {
+      "source": "mangadex",
+      "id": "a96676e5-8ae2-425e-b549-7f15dd34a6d8",
+      "title": "SAMPLE manga: good tier",
+      "category": "manga",
+      "tier": "good",
+      "note": "SAMPLE: a recommendation without bookmarks."
+    },
+    {
+      "source": "mangadex",
+      "id": "00000000-0000-0000-0000-000000000000",
+      "title": "SAMPLE manga: interesting tier",
+      "category": "manga",
+      "tier": "interesting",
+      "note": "SAMPLE: replace id with a real MangaDex UUID (the part after /title/ in the URL)."
+    },
+    {
+      "source": "mangadex",
+      "id": "00000000-0000-0000-0000-000000000001",
+      "title": "SAMPLE manga: trial tier",
+      "category": "manga",
+      "tier": "trial",
+      "note": "SAMPLE: worth a few chapters before deciding."
     },
     {
       "source": "webtoons",
@@ -23,9 +61,38 @@
       "title": "I Only Need Our Child, Your Grace",
       "cover": "https://webtoon-phinf.pstatic.net/20260615_184/17815033012754vhSx_JPEG/3Thumb_Poster-2_10336.jpg?type=q70",
       "category": "manhwa",
-      "tier": "trial",
-      "note": "Sample entry.",
-      "bookmarks": [{ "chapterId": "1", "chapterName": "Ep. 1 - The Second \"First Night\"", "page": 1, "note": "Where the hook lands" }]
+      "tier": "good",
+      "note": "SAMPLE: cover is optional; without it a letter tile is shown.",
+      "bookmarks": [
+        {
+          "chapterId": "1",
+          "chapterName": "Ep. 1",
+          "page": 1,
+          "note": "SAMPLE: for WEBTOON, chapterId is the episode number."
+        }
+      ]
+    },
+    {
+      "source": "webtoons",
+      "id": "5988",
+      "title": "The Stellar Swordmaster",
+      "category": "manhwa",
+      "tier": "all-time",
+      "note": "SAMPLE: replace id with the title_no from the WEBTOON list URL."
+    },
+    {
+      "source": "webtoons",
+      "id": "0",
+      "title": "SAMPLE manhwa: interesting tier",
+      "category": "manhwa",
+      "tier": "interesting"
+    },
+    {
+      "source": "webtoons",
+      "id": "1",
+      "title": "SAMPLE manhwa: trial tier",
+      "category": "manhwa",
+      "tier": "trial"
     },
     {
       "source": "hentai20",
@@ -33,7 +100,54 @@
       "title": "Secret Class",
       "category": "interesting",
       "tier": "good",
-      "note": "Sample entry."
+      "note": "SAMPLE: for Hentai20, id is the slug in hentai20.io/manga/<slug>/.",
+      "bookmarks": [
+        {
+          "chapterId": "secret-class-chapter-323",
+          "chapterName": "Chapter 323",
+          "page": 1,
+          "note": "SAMPLE: for Hentai20, chapterId is the chapter slug."
+        }
+      ]
+    },
+    {
+      "source": "hentai20",
+      "id": "my-ideal-type-is-my-friend-s-mom",
+      "title": "My Ideal Type is My Friend’s Mom",
+      "category": "interesting",
+      "tier": "trial"
+    },
+    {
+      "source": "hentai20",
+      "id": "sample-all-time",
+      "title": "SAMPLE interesting: all-time tier",
+      "category": "interesting",
+      "tier": "all-time"
+    },
+    {
+      "source": "hentai20",
+      "id": "sample-interesting",
+      "title": "SAMPLE interesting: interesting tier",
+      "category": "interesting",
+      "tier": "interesting"
+    },
+    {
+      "source": "external",
+      "id": "sample-novel-1",
+      "title": "SAMPLE light novel: all-time tier",
+      "cover": "https://example.com/cover.jpg",
+      "url": "https://example.com/novel-1",
+      "category": "novel",
+      "tier": "all-time",
+      "note": "SAMPLE: light novels use source \"external\"; tapping opens url in the browser."
+    },
+    {
+      "source": "external",
+      "id": "sample-novel-2",
+      "title": "SAMPLE light novel: good tier",
+      "url": "https://example.com/novel-2",
+      "category": "novel",
+      "tier": "good"
     }
   ]
 }

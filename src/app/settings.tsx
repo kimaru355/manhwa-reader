@@ -1,13 +1,18 @@
 import { Ionicons } from '@expo/vector-icons';
+import { router } from 'expo-router';
 import { useState } from 'react';
 import { ActivityIndicator, Alert, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 
-import { pickImportFile } from '../../lib/backup';
-import { clearTemp } from '../../lib/files';
-import { useLibrary } from '../../lib/library';
-import { useRecs } from '../../lib/recs';
-import { useTheme } from '../../lib/theme';
-import type { Snapshot } from '../../lib/types';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
+
+import { useAccount } from '../lib/account';
+import { pickImportFile } from '../lib/backup';
+import { friendly } from '../lib/errors';
+import { clearTemp } from '../lib/files';
+import { useLibrary } from '../lib/library';
+import { useRecs } from '../lib/recs';
+import { useTheme } from '../lib/theme';
+import type { Snapshot } from '../lib/types';
 
 const describe = (s: Snapshot) =>
   `Saved ${new Date(s.savedAt).toLocaleString()}\n${s.favorites.length} favorites · ` +
@@ -15,6 +20,7 @@ const describe = (s: Snapshot) =>
 
 export default function Settings() {
   const t = useTheme();
+  const insets = useSafeAreaInsets();
   const {
     backupDir,
     lastBackup,
@@ -26,10 +32,11 @@ export default function Settings() {
     restoreSnapshot,
   } = useLibrary();
   const recs = useRecs();
+  const account = useAccount();
   const [draft, setRecsUrl] = useState<string | null>(null);
   const recsUrl = draft ?? recs.url;
 
-  const fail = (e: unknown) => Alert.alert('Something went wrong', String((e as Error)?.message ?? e));
+  const fail = (e: unknown) => Alert.alert('Something went wrong', friendly(e));
 
   const chooseBackup = async () => {
     try {
@@ -75,8 +82,27 @@ export default function Settings() {
   const updated = recs.recs.updated ? ` · updated ${recs.recs.updated}` : '';
 
   return (
-    <ScrollView contentContainerStyle={styles.wrap}>
-      <Text style={[styles.section, { color: t.sub }]}>AUTHOR RECOMMENDATIONS</Text>
+    <View style={[styles.flex, { backgroundColor: t.bg }]}>
+      <View style={[styles.bar, { paddingTop: insets.top + 4 }]}>
+        <Pressable hitSlop={12} onPress={() => router.back()}>
+          <Ionicons name="chevron-back" size={26} color={t.text} />
+        </Pressable>
+        <Text style={[styles.barTitle, { color: t.text }]}>Settings</Text>
+        <View style={{ width: 26 }} />
+      </View>
+    <ScrollView contentContainerStyle={[styles.wrap, { paddingBottom: insets.bottom + 24 }]}>
+      <Pressable onPress={() => router.push('/account')} style={[styles.folder, { backgroundColor: t.card }]}>
+        <Ionicons name="person-circle-outline" size={28} color={t.accent} />
+        <View style={styles.folderInfo}>
+          <Text style={[styles.folderName, { color: t.text }]}>Account</Text>
+          <Text style={{ color: t.sub, fontSize: 12 }}>
+            {account.user ? account.user.email : 'Optional: sync bookmarks and share recommendations'}
+          </Text>
+        </View>
+        <Ionicons name="chevron-forward" size={18} color={t.sub} />
+      </Pressable>
+
+      <Text style={[styles.section, { color: t.sub, marginTop: 14 }]}>AUTHOR RECOMMENDATIONS</Text>
       <Text style={[styles.hint, { color: t.sub }]}>
         Home shows the author’s picks and chapter bookmarks from a JSON file. Paste its link to load a different
         list; leave it empty to use the list built into the app.
@@ -160,10 +186,14 @@ export default function Settings() {
         </Pressable>
       </View>
     </ScrollView>
+    </View>
   );
 }
 
 const styles = StyleSheet.create({
+  flex: { flex: 1 },
+  bar: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 14, paddingBottom: 8 },
+  barTitle: { fontSize: 18, fontWeight: '700' },
   wrap: { padding: 16, gap: 10 },
   section: { fontSize: 12, fontWeight: '700', letterSpacing: 0.8, marginTop: 4 },
   hint: { fontSize: 13, lineHeight: 18, marginBottom: 4 },

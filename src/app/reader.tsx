@@ -7,6 +7,7 @@ import { StatusBar } from 'expo-status-bar';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
+  Alert,
   FlatList,
   Image as RNImage,
   Modal,
@@ -22,12 +23,15 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { BookmarksSheet } from '../components/BookmarksSheet';
 import { StatusPill } from '../components/StatusPill';
+import { useAccount } from '../lib/account';
+import { submitBookmark } from '../lib/community';
 import { useDownloads } from '../lib/downloads';
-import { chapterDir, fetchPages, pruneTemp } from '../lib/files';
+import { friendly, toastError } from '../lib/errors';
+import { chapterDir, pruneTemp } from '../lib/files';
 import { useLibrary } from '../lib/library';
+import { AHEAD_INITIAL, AHEAD_MIN, AHEAD_STEP, loadOnlineChapter } from '../lib/prefetch';
 import { useRecs } from '../lib/recs';
-import { parseRef, useChapters } from '../lib/series';
-import { getSource } from '../lib/sources';
+import { parseRef, useChapters, useCommunityBookmarks } from '../lib/series';
 import type { Bookmark, Chapter } from '../lib/types';
 import { mapLimit } from '../lib/util';
 
@@ -59,6 +63,8 @@ export default function Reader() {
   const { find } = useRecs();
   const dl = useDownloads();
   const { chapters } = useChapters(series);
+  const communityMarks = useCommunityBookmarks(series);
+  const account = useAccount();
 
   const [chId, setChId] = useState(params.ch ?? '');
   const [startPage, setStartPage] = useState(() => Math.max(Number(params.page) || 1, 1));
@@ -73,6 +79,8 @@ export default function Reader() {
   const [marksOpen, setMarksOpen] = useState(false);
   const listRef = useRef<FlatList<string>>(null);
   const tracking = useRef(false);
+  // Last chapter index that has been loaded ahead of the reader (-1 = none yet).
+  const cachedThrough = useRef(-1);
 
   const idx = chapters.findIndex((c) => c.id === chId);
   // A downloaded chapter opens without waiting for the chapter list to load.
@@ -99,18 +107,15 @@ export default function Reader() {
         dir = chapterDir(series.key, chapter.id, true);
         names = saved.files;
       } else {
-        const source = getSource(series.source);
-        if (!source) throw new Error('This title cannot be read in the app.');
-        dir = chapterDir(series.key, chapter.id, false);
-        const urls = await source.pages(series, chapter);
         // The whole chapter is fetched at full quality before it opens, so nothing loads mid-read.
-        names = await fetchPages(
-          urls,
-          dir,
-          source.imageHeaders,
+        const res = await loadOnlineChapter(
+          series,
+          chapter,
           (done, tot) => alive && setProgress({ done, total: tot }),
           () => !alive,
         );
+        dir = res.dir;
+        names = res.names;
       }
       const uris = names.map((n) => `${dir}${n}`);
       const ratios = await mapLimit(
@@ -130,7 +135,11 @@ export default function Reader() {
       if (!saved) pruneTemp();
       // Ignore the initial scroll so a fresh open can't overwrite saved progress.
       setTimeout(() => alive && (tracking.current = true), 600);
-    })().catch((e) => alive && String(e?.message) !== 'Cancelled' && setError(String(e?.message ?? e)));
+    })().catch((e) => {
+      if (!alive || String(e?.message) === 'Cancelled') return;
+      setError(friendly(e));
+      toastError(e);
+    });
     return () => {
       alive = false;
     };
@@ -154,6 +163,39 @@ export default function Reader() {
     saveProgress({ series, chapterId: chapter.id, chapterName: chapter.name, page, total });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [page, total]);
+
+  // Read-ahead: keep upcoming chapters on disk so the next one opens instantly. Ten load first, and five
+  // more whenever five or fewer are left. Failures are silent; it simply tries again later.
+  useEffect(() => {
+    if (!series || !loaded || idx < 0) return;
+    const last = chapters.length - 1;
+    let through = cachedThrough.current;
+    if (through < idx) through = idx + AHEAD_INITIAL;
+    else if (through - idx <= AHEAD_MIN) through += AHEAD_STEP;
+    through = Math.min(through, last);
+    let alive = true;
+    (async () => {
+      const from = Math.max(cachedThrough.current, idx) + 1;
+      for (let i = from; i <= through && alive; i++) {
+        const next = chapters[i];
+        if (dl.getChapter(series.key, next.id)) {
+          cachedThrough.current = i;
+          continue;
+        }
+        try {
+          await loadOnlineChapter(series, next, undefined, () => !alive);
+          cachedThrough.current = i;
+        } catch {
+          return;
+        }
+      }
+    })();
+    return () => {
+      alive = false;
+    };
+    // Re-evaluated when the reader moves to another chapter or finishes loading one.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [idx, loaded, chapters.length]);
 
   if (!series || !chapter) {
     return (
@@ -198,7 +240,38 @@ export default function Reader() {
     note: b.note ?? '',
     ts: 0,
   }));
+  const community: Bookmark[] = communityMarks.map((b) => ({
+    id: `community-${b.id}`,
+    seriesKey: series.key,
+    chapterId: b.chapterId,
+    chapterName: b.chapterName,
+    page: b.page,
+    note: b.note ?? '',
+    ts: 0,
+  }));
   const bookmarks = getBookmarks(series.key);
+
+  // Suggesting a bookmark to everyone needs an account; an admin approves it before anyone sees it.
+  const shareBookmark = (b: Bookmark) => {
+    if (!account.user) {
+      Alert.alert('Sign in to share', 'An account is only needed to share bookmarks, not to read.', [
+        { text: 'Not now', style: 'cancel' },
+        { text: 'Sign in', onPress: () => router.push('/account') },
+      ]);
+      return;
+    }
+    Alert.alert('Suggest this bookmark?', `${b.chapterName} · p.${b.page}
+An admin reviews it before anyone else sees it.`, [
+      { text: 'Cancel', style: 'cancel' },
+      {
+        text: 'Suggest',
+        onPress: () =>
+          submitBookmark(series, b)
+            .then(() => Alert.alert('Sent for review', 'It will show up for everyone once it is approved.'))
+            .catch((e) => Alert.alert("Couldn't send it", friendly(e))),
+      },
+    ]);
+  };
   const chapterMarked = bookmarks.some((b) => b.chapterId === chapter.id);
 
   const openBookmark = (b: Bookmark) => {
@@ -310,6 +383,8 @@ export default function Reader() {
             current={{ chapter, page }}
             bookmarks={bookmarks}
             author={author}
+            community={community}
+            onShare={account.enabled ? shareBookmark : undefined}
             onAdd={(note) =>
               addBookmark({ seriesKey: series.key, chapterId: chapter.id, chapterName: chapter.name, page, note })
             }

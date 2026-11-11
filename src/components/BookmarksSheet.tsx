@@ -26,6 +26,10 @@ type Props = {
   bookmarks: Bookmark[];
   /** Bookmarks from the author's recommendation; read-only. */
   author?: Bookmark[];
+  /** Approved bookmarks suggested by other readers; read-only. */
+  community?: Bookmark[];
+  /** Suggest one of your bookmarks to everyone (an admin reviews it first). */
+  onShare?: (b: Bookmark) => void;
   onAdd: (note: string) => void;
   onOpen: (b: Bookmark) => void;
   onRemove: (id: string) => void;
@@ -33,7 +37,7 @@ type Props = {
 };
 
 /** Reader sheet: bookmark the current spot with an optional note, and jump to saved ones. */
-export function BookmarksSheet({ visible, onClose, chapters, current, bookmarks, author = [], onAdd, onOpen, onRemove, onEdit }: Props) {
+export function BookmarksSheet({ visible, onClose, chapters, current, bookmarks, author = [], community = [], onShare, onAdd, onOpen, onRemove, onEdit }: Props) {
   const insets = useSafeAreaInsets();
   const [note, setNote] = useState('');
   const [editing, setEditing] = useState<Bookmark | null>(null);
@@ -137,6 +141,26 @@ export function BookmarksSheet({ visible, onClose, chapters, current, bookmarks,
                     ))}
                   </View>
                 ) : null}
+                {community.length ? (
+                  <View>
+                    <Text style={[styles.title, { paddingTop: 8 }]}>Community bookmarks</Text>
+                    {community.map((b) => (
+                      <Pressable key={b.id} style={styles.row} onPress={() => onOpen(b)}>
+                        <Ionicons name="people" size={18} color={ACCENT} />
+                        <View style={styles.rowText}>
+                          <Text numberOfLines={1} style={styles.rowTitle}>
+                            {b.chapterName} · p.{b.page}
+                          </Text>
+                          {b.note ? (
+                            <Text numberOfLines={2} style={styles.rowNote}>
+                              {b.note}
+                            </Text>
+                          ) : null}
+                        </View>
+                      </Pressable>
+                    ))}
+                  </View>
+                ) : null}
                 <Text style={[styles.title, { paddingTop: 8 }]}>
                   Saved{sorted.length ? ` (${sorted.length})` : ''}
                 </Text>
@@ -158,6 +182,11 @@ export function BookmarksSheet({ visible, onClose, chapters, current, bookmarks,
                       </Text>
                     ) : null}
                   </View>
+                  {onShare ? (
+                    <Pressable hitSlop={10} onPress={() => onShare(item)}>
+                      <Ionicons name="share-social-outline" size={20} color="#9A9AA4" />
+                    </Pressable>
+                  ) : null}
                   <Pressable hitSlop={10} onPress={() => startEdit(item)}>
                     <Ionicons
                       name="create-outline"

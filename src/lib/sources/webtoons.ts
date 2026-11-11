@@ -1,3 +1,4 @@
+import { FriendlyError } from '../errors';
 import type { Chapter, Series } from '../types';
 import { decodeHtml, getJson, getText } from './http';
 import type { Source } from './types';
@@ -68,11 +69,11 @@ export const webtoons: Source = {
   },
 
   async pages(_series, chapter) {
-    if (!chapter.url) throw new Error('Missing chapter link');
+    if (!chapter.url) throw new FriendlyError("This chapter can't be opened.");
     const html = await getText(chapter.url);
     const block = html.match(/var imageList = \[([\s\S]*?)\];/)?.[1];
     const urls = block ? [...block.matchAll(/url:\s*"([^"]+)"/g)].map((m) => m[1]) : [];
-    if (!urls.length) throw new Error('This episode has no free pages (it may be locked).');
+    if (!urls.length) throw new FriendlyError('This episode is locked or has no free pages.');
     return urls;
   },
 };

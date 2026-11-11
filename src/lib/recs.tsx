@@ -2,10 +2,12 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from 'react';
 
 import bundled from '../data/recommendations.json';
+import { API_BASE_URL } from './config';
+import { friendly, toastError } from './errors';
 import type { AuthorBookmark, Category, RecsFile, Recommendation, Series, SourceId, Tier } from './types';
 
-/** Set this to the raw URL of your recommendations.json to ship it as the default. */
-export const DEFAULT_RECS_URL = '';
+/** Where the app fetches the author's recommendations from (can be overridden in Settings). */
+export const DEFAULT_RECS_URL = `${API_BASE_URL}/recommendations.json`;
 
 const KEYS = { url: 'recsUrl1', cache: 'recsCache1' } as const;
 
@@ -113,13 +115,14 @@ export function RecsProvider({ children }: { children: ReactNode }) {
     setError(null);
     try {
       const res = await fetch(u, { headers: { 'Cache-Control': 'no-cache' } });
-      if (!res.ok) throw new Error(`The server answered ${res.status}`);
+      if (!res.ok) throw new Error(`answered ${res.status}`);
       const text = await res.text();
       const parsed = parseRecs(JSON.parse(text));
       setRecs(parsed);
       AsyncStorage.setItem(KEYS.cache, text).catch(() => {});
     } catch (e) {
-      setError(`Could not update recommendations (${String((e as Error)?.message ?? e)}). Showing the last saved list.`);
+      setError(`Couldn't update recommendations. ${friendly(e)} Showing the last saved list.`);
+      toastError(e);
     } finally {
       setLoading(false);
     }
