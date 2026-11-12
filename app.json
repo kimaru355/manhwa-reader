@@ -3,7 +3,7 @@
     "name": "Manhwa Reader",
     "slug": "manhwa-reader",
     "scheme": "manhwareader",
-    "version": "1.1.0",
+    "version": "1.2.0",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
     "userInterfaceStyle": "automatic",
@@ -16,9 +16,7 @@
         "monochromeImage": "./assets/android-icon-monochrome.png"
       },
       "predictiveBackGestureEnabled": false,
-      "versionCode": 2,
       "permissions": [
-        "REQUEST_INSTALL_PACKAGES",
         "FOREGROUND_SERVICE",
         "FOREGROUND_SERVICE_DATA_SYNC",
         "POST_NOTIFICATIONS"
@@ -28,7 +26,8 @@
       "expo-router",
       "expo-image",
       "expo-font",
-      "./plugins/withBackgroundService"
+      "./plugins/withBackgroundService",
+      "./plugins/withWindowsNativeBuild"
     ],
     "extra": {
       "router": {

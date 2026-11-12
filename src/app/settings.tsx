@@ -11,7 +11,7 @@ import { friendly } from '../lib/errors';
 import { clearTemp } from '../lib/files';
 import { useLibrary } from '../lib/library';
 import { useRecs } from '../lib/recs';
-import { canSelfUpdate, installedName } from '../lib/update';
+import { canSelfUpdate, installedName, openDownload } from '../lib/update';
 import { useUpdater } from '../lib/useUpdater';
 import { useTheme } from '../lib/theme';
 import type { Snapshot } from '../lib/types';
@@ -107,14 +107,14 @@ export default function Settings() {
 
       {canSelfUpdate ? (
         <Pressable
-          onPress={() => (updater.state.kind === 'available' ? updater.install(updater.state.info) : updater.check())}
-          disabled={updater.state.kind === 'checking' || updater.state.kind === 'downloading'}
+          onPress={() => (updater.state.kind === 'available' ? openDownload() : updater.check())}
+          disabled={updater.state.kind === 'checking'}
           style={[styles.folder, { backgroundColor: t.card, marginTop: 10 }]}
         >
           <Ionicons name="cloud-download-outline" size={28} color={t.accent} />
           <View style={styles.folderInfo}>
             <Text style={[styles.folderName, { color: t.text }]}>
-              {updater.state.kind === 'available' ? 'Install update' : 'Check for updates'}
+              {updater.state.kind === 'available' ? 'Download update' : 'Check for updates'}
             </Text>
             <Text style={{ color: updater.state.kind === 'error' ? t.danger : t.sub, fontSize: 12 }}>
               {updater.state.kind === 'checking'
@@ -123,14 +123,12 @@ export default function Settings() {
                   ? `You have the latest version (${installedName()})`
                   : updater.state.kind === 'available'
                     ? `Version ${updater.state.info.versionName || updater.state.info.versionCode} is available`
-                    : updater.state.kind === 'downloading'
-                      ? `Downloading… ${Math.round(updater.state.progress * 100)}%`
-                      : updater.state.kind === 'error'
-                        ? updater.state.message
-                        : `Version ${installedName()}`}
+                    : updater.state.kind === 'error'
+                      ? updater.state.message
+                      : `Version ${installedName()}`}
             </Text>
           </View>
-          {updater.state.kind === 'checking' || updater.state.kind === 'downloading' ? (
+          {updater.state.kind === 'checking' ? (
             <ActivityIndicator color={t.accent} />
           ) : (
             <Ionicons name="chevron-forward" size={18} color={t.sub} />

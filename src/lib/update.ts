@@ -1,7 +1,5 @@
 import * as Application from 'expo-application';
-import * as FS from 'expo-file-system/legacy';
-import * as IntentLauncher from 'expo-intent-launcher';
-import { Platform } from 'react-native';
+import { Linking, Platform } from 'react-native';
 
 import { API_BASE_URL } from './config';
 import { FriendlyError, friendly } from './errors';
@@ -36,23 +34,5 @@ export async function checkForUpdate(): Promise<UpdateInfo | null> {
   }
 }
 
-/** Downloads the new APK and hands it to Android's installer. */
-export async function installUpdate(onProgress?: (fraction: number) => void): Promise<void> {
-  const dest = `${FS.cacheDirectory}manhwa-reader-update.apk`;
-  await FS.deleteAsync(dest, { idempotent: true }).catch(() => {});
-  try {
-    const dl = FS.createDownloadResumable(`${APK_URL}?t=${Date.now()}`, dest, {}, (p) => {
-      if (p.totalBytesExpectedToWrite > 0) onProgress?.(p.totalBytesWritten / p.totalBytesExpectedToWrite);
-    });
-    const res = await dl.downloadAsync();
-    if (!res || res.status !== 200) throw new Error(`answered ${res?.status ?? 'nothing'}`);
-    const uri = await FS.getContentUriAsync(dest);
-    await IntentLauncher.startActivityAsync('android.intent.action.VIEW', {
-      data: uri,
-      flags: 1, // FLAG_GRANT_READ_URI_PERMISSION
-      type: 'application/vnd.android.package-archive',
-    });
-  } catch (e) {
-    throw new FriendlyError(friendly(e));
-  }
-}
+/** Opens the download link in the browser; the person installs the new build from there. */
+export const openDownload = () => Linking.openURL(APK_URL).catch(() => {});
