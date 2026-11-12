@@ -114,6 +114,7 @@ export default function Discover() {
           options={[
             { value: 'manga', label: 'Manga' },
             { value: 'manhwa', label: 'Manhwa' },
+            { value: 'novel', label: 'Novels' },
           ]}
         />
       ) : null}

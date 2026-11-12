@@ -2,6 +2,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as FS from 'expo-file-system/legacy';
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 
+import { startBackground, stopBackground, updateBackground } from './background';
 import { friendly } from './errors';
 import { chapterDir, downloadFile, fetchPages, removeDir, seriesDir } from './files';
 import { getSource, imageHeaders } from './sources';
@@ -41,6 +42,8 @@ type DownloadsContext = {
   cancel: (seriesKey: string, chapterId: string) => void;
   cancelSeries: (seriesKey: string) => void;
   retry: (seriesKey: string, chapterId: string) => void;
+  /** Moves a title earlier (-1) or later (1) in the download order. */
+  moveSeries: (seriesKey: string, direction: -1 | 1) => void;
   removeChapter: (seriesKey: string, chapterId: string) => void;
   removeSeries: (seriesKey: string) => void;
 };
@@ -118,7 +121,10 @@ export function DownloadsProvider({ children }: { children: ReactNode }) {
       const urls = await source.pages(job.series, job.chapter);
       if (shouldStop()) throw new Error('Cancelled');
       const dir = chapterDir(job.series.key, job.chapter.id, true);
-      const files = await fetchPages(urls, dir, source.imageHeaders, (done, total) => patch(k, { done, total }), shouldStop);
+      const files = await fetchPages(urls, dir, source.imageHeaders, (done, total) => {
+        patch(k, { done, total });
+        updateBackground(`${job.series.title} · ${job.chapter.name} · ${done}/${total} pages`, done, total);
+      }, shouldStop);
       const cover = await saveCover(job.series);
       const saved: DownloadedChapter = { ...job.chapter, files, ts: Date.now() };
       const list = itemsRef.current;
@@ -154,10 +160,12 @@ export function DownloadsProvider({ children }: { children: ReactNode }) {
       for (;;) {
         const job = queueRef.current.find((j) => j.state === 'queued' && startedRef.current.includes(j.series.key));
         if (!job) break;
+        startBackground('Starting…');
         await run(job);
       }
     } finally {
       running.current = false;
+      stopBackground();
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
@@ -251,6 +259,21 @@ export function DownloadsProvider({ children }: { children: ReactNode }) {
     [patch, start],
   );
 
+  const moveSeries = useCallback(
+    (seriesKey: string, direction: -1 | 1) => {
+      updateQueue((q) => {
+        const order = [...new Set(q.map((j) => j.series.key))];
+        const from = order.indexOf(seriesKey);
+        const to = from + direction;
+        if (from < 0 || to < 0 || to >= order.length) return q;
+        [order[from], order[to]] = [order[to], order[from]];
+        // Chapters keep their order inside a title; titles follow the new order.
+        return order.flatMap((k) => q.filter((j) => j.series.key === k));
+      });
+    },
+    [updateQueue],
+  );
+
   const removeChapter = useCallback(
     (seriesKey: string, chapterId: string) => {
       removeDir(chapterDir(seriesKey, chapterId, true));
@@ -287,10 +310,11 @@ export function DownloadsProvider({ children }: { children: ReactNode }) {
       cancel,
       cancelSeries,
       retry,
+      moveSeries,
       removeChapter,
       removeSeries,
     };
-  }, [items, queue, started, enqueue, start, stop, cancel, cancelSeries, retry, removeChapter, removeSeries]);
+  }, [items, queue, started, enqueue, start, stop, cancel, cancelSeries, retry, moveSeries, removeChapter, removeSeries]);
 
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>;
 }

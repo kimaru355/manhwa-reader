@@ -4,6 +4,8 @@ import type { Source } from './types';
 
 const API = 'https://api.mangadex.org';
 const PAGE = 30;
+/** MangaDex sends browser-like clients to a bot check; a plain app User-Agent gets the API. */
+const HEADERS = { 'User-Agent': 'ManhwaReader/1.0' };
 const RATINGS = [
   ['contentRating[]', 'safe'],
   ['contentRating[]', 'suggestive'],
@@ -49,7 +51,7 @@ export const mangadex: Source = {
       ...RATINGS,
       q ? ['title', q] : ['order[followedCount]', 'desc'],
     ];
-    const res = await getJson<{ data: MdManga[]; total: number }>(`${API}/manga?${qs(params)}`);
+    const res = await getJson<{ data: MdManga[]; total: number }>(`${API}/manga?${qs(params)}`, HEADERS);
     return { items: res.data.map(toSeries), hasMore: (page + 1) * PAGE < res.total };
   },
 
@@ -67,7 +69,7 @@ export const mangadex: Source = {
         ['includeExternalUrl', 0],
         ...RATINGS,
       ])}`;
-      const res = await getJson<{ data: Feed[]; total: number }>(url);
+      const res = await getJson<{ data: Feed[]; total: number }>(url, HEADERS);
       for (const c of res.data) {
         const { chapter, title, pages } = c.attributes;
         if (!pages) continue;
@@ -86,6 +88,7 @@ export const mangadex: Source = {
   async pages(_series, chapter) {
     const res = await getJson<{ baseUrl: string; chapter: { hash: string; data: string[] } }>(
       `${API}/at-home/server/${chapter.id}`,
+      HEADERS,
     );
     return res.chapter.data.map((f) => `${res.baseUrl}/data/${res.chapter.hash}/${f}`);
   },

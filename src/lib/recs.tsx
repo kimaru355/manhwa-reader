@@ -13,7 +13,7 @@ const KEYS = { url: 'recsUrl1', cache: 'recsCache1' } as const;
 
 const CATEGORIES: Category[] = ['manga', 'manhwa', 'interesting', 'novel'];
 const TIERS: Tier[] = ['all-time', 'interesting', 'good', 'trial'];
-const SOURCES: SourceId[] = ['mangadex', 'webtoons', 'hentai20', 'external'];
+const SOURCES: SourceId[] = ['mangadex', 'webtoons', 'hentai20', 'novelfull', 'external'];
 
 export const TIER_LABEL: Record<Tier, string> = {
   'all-time': 'All-time',

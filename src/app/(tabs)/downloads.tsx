@@ -14,7 +14,7 @@ type Group = { series: Series; jobs: Job[] };
 
 export default function Downloads() {
   const t = useTheme();
-  const { items, queue, started, start, stop, cancelSeries, removeSeries } = useDownloads();
+  const { items, queue, started, start, stop, cancelSeries, removeSeries, moveSeries } = useDownloads();
 
   const groups = useMemo(() => {
     const map = new Map<string, Group>();
@@ -76,7 +76,7 @@ export default function Downloads() {
         </Pressable>
       </View>
 
-      {groups.map((g) => {
+      {groups.map((g, gi) => {
         const on = started.includes(g.series.key);
         return (
           <View key={g.series.key} style={[styles.group, { backgroundColor: t.card }]}>
@@ -109,6 +109,19 @@ export default function Downloads() {
                 <Ionicons name={on ? 'pause' : 'play'} size={14} color={on ? t.text : '#fff'} />
                 <Text style={{ color: on ? t.text : '#fff', fontWeight: '600', fontSize: 13 }}>{on ? 'Pause' : 'Start'}</Text>
               </Pressable>
+              <View style={styles.order}>
+                <Pressable hitSlop={8} disabled={gi === 0} onPress={() => moveSeries(g.series.key, -1)} style={{ opacity: gi === 0 ? 0.3 : 1 }}>
+                  <Ionicons name="arrow-up-circle-outline" size={26} color={t.sub} />
+                </Pressable>
+                <Pressable
+                  hitSlop={8}
+                  disabled={gi === groups.length - 1}
+                  onPress={() => moveSeries(g.series.key, 1)}
+                  style={{ opacity: gi === groups.length - 1 ? 0.3 : 1 }}
+                >
+                  <Ionicons name="arrow-down-circle-outline" size={26} color={t.sub} />
+                </Pressable>
+              </View>
               <Pressable hitSlop={8} onPress={() => confirmCancel(g)}>
                 <Ionicons name="close-circle-outline" size={24} color={t.sub} />
               </Pressable>
@@ -144,6 +157,7 @@ const styles = StyleSheet.create({
   thumb: { width: 48, height: 66 },
   groupText: { flex: 1, gap: 2 },
   groupTitle: { fontSize: 15, fontWeight: '600' },
+  order: { flexDirection: 'row', gap: 10, marginLeft: 'auto', marginRight: 10 },
   groupActions: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
   smallBtn: { flexDirection: 'row', alignItems: 'center', gap: 6, paddingHorizontal: 14, paddingVertical: 7, borderRadius: 16 },
 });

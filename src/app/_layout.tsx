@@ -2,6 +2,7 @@ import { Stack } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 import { Pressable, Text, View } from 'react-native';
 
+import { UpdateCheck } from '../components/UpdateCheck';
 import { AccountProvider } from '../lib/account';
 import { DownloadsProvider } from '../lib/downloads';
 import { LibraryProvider } from '../lib/library';
@@ -27,12 +28,14 @@ export default function RootLayout() {
       <RecsProvider>
         <DownloadsProvider>
           <StatusBar style="auto" />
+          <UpdateCheck />
           <Stack screenOptions={{ headerShown: false }}>
             <Stack.Screen name="(tabs)" />
             <Stack.Screen name="series" />
             <Stack.Screen name="settings" />
             <Stack.Screen name="account" />
             <Stack.Screen name="reader" options={{ animation: 'fade' }} />
+            <Stack.Screen name="novel" />
           </Stack>
         </DownloadsProvider>
       </RecsProvider>

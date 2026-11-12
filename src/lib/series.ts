@@ -18,7 +18,8 @@ export function openSeries(series: Series) {
 }
 
 export function openReader(series: Series, chapterId: string, page = 1) {
-  router.push({ pathname: '/reader', params: { ref: JSON.stringify(series), ch: chapterId, page: String(page) } });
+  const pathname = getSource(series.source)?.kind === 'text' ? '/novel' : '/reader';
+  router.push({ pathname, params: { ref: JSON.stringify(series), ch: chapterId, page: String(page) } });
 }
 
 export function parseRef(raw: string | undefined): Series | null {

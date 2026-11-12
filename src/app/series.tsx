@@ -59,6 +59,7 @@ export default function SeriesDetail() {
   const pending = chapters.filter((c) => !dl.getChapter(series.key, c.id) && !dl.getJob(series.key, c.id));
   const waiting = dl.queue.filter((j) => j.series.key === series.key);
   const running = dl.started.includes(series.key);
+  const textOnly = getSource(series.source)?.kind === 'text';
   const sourceName = getSource(series.source)?.name ?? series.source;
 
   const startReading = () => {
@@ -177,7 +178,7 @@ export default function SeriesDetail() {
               </Text>
             </Pressable>
 
-            {chapters.length ? (
+            {chapters.length && !textOnly ? (
               <View style={styles.actions}>
                 <Pressable
                   disabled={!pending.length}
@@ -266,9 +267,13 @@ export default function SeriesDetail() {
               {crowd.length ? <Ionicons name="people" size={16} color={t.accent} /> : null}
               {marks.length ? <Ionicons name="bookmark" size={16} color={t.accent} /> : null}
               {current ? (
-                <Text style={{ color: t.accent, fontSize: 12 }}>
-                  p.{progress!.page}/{progress!.total || '?'}
-                </Text>
+                textOnly ? (
+                  <Ionicons name="bookmark" size={16} color={t.accent} />
+                ) : (
+                  <Text style={{ color: t.accent, fontSize: 12 }}>
+                    p.{progress!.page}/{progress!.total || '?'}
+                  </Text>
+                )
               ) : read ? (
                 <Ionicons name="checkmark-circle" size={18} color={t.sub} />
               ) : null}
@@ -291,7 +296,7 @@ export default function SeriesDetail() {
                     <Ionicons name="time-outline" size={22} color={t.sub} />
                   )}
                 </Pressable>
-              ) : (
+              ) : textOnly ? null : (
                 <Pressable hitSlop={10} onPress={() => addToDownloads([c])}>
                   <Ionicons name="download-outline" size={22} color={t.sub} />
                 </Pressable>

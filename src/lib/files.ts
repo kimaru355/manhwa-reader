@@ -19,12 +19,23 @@ async function exists(path: string) {
   return info.exists && (info as { size?: number }).size !== 0;
 }
 
+const FILE_TIMEOUT_MS = 45_000;
+
 export async function downloadFile(url: string, dest: string, headers: Record<string, string>) {
   if (await exists(dest)) return;
   let last: unknown;
   for (let attempt = 0; attempt < 3; attempt++) {
     try {
-      const res = await FS.downloadAsync(url, dest, { headers });
+      // A stalled connection never errors on its own, so each file gets a time limit and is cancelled.
+      const dl = FS.createDownloadResumable(url, dest, { headers });
+      const timer = setTimeout(() => dl.cancelAsync().catch(() => {}), FILE_TIMEOUT_MS);
+      let res;
+      try {
+        res = await dl.downloadAsync();
+      } finally {
+        clearTimeout(timer);
+      }
+      if (!res) throw new Error('Image request timed out');
       if (res.status === 200) return;
       last = new Error(`Image request answered ${res.status}`);
     } catch (e) {
