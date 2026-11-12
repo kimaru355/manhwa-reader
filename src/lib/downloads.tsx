@@ -5,7 +5,7 @@ import { createContext, useCallback, useContext, useEffect, useMemo, useRef, use
 import { startBackground, stopBackground, updateBackground } from './background';
 import { friendly } from './errors';
 import { chapterDir, downloadFile, fetchPages, removeDir, seriesDir } from './files';
-import { getSource, imageHeaders } from './sources';
+import { getSource, imageHeaders, isKnownSource } from './sources';
 import type { Chapter, DownloadedChapter, DownloadedSeries, Series } from './types';
 
 const KEYS = { items: 'downloads1', queue: 'downloadQueue1', started: 'downloadStarted1' } as const;
@@ -189,7 +189,9 @@ export function DownloadsProvider({ children }: { children: ReactNode }) {
       itemsRef.current = saved;
       setItems(saved);
       // Chapters that finished while the queue was being saved are not downloaded twice.
-      const pending = q.filter(
+      const pending = q
+        .filter((j) => isKnownSource(j.series.source))
+        .filter(
         (j) => !saved.find((i) => i.series.key === j.series.key)?.chapters.some((c) => c.id === j.chapter.id),
       );
       queueRef.current = pending;

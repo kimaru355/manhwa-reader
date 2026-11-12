@@ -16,7 +16,7 @@ import { friendly, toastError } from '../lib/errors';
 import { TIER_LABEL, TIER_ORDER } from '../lib/recs';
 import { openSeries } from '../lib/series';
 import { useTheme } from '../lib/theme';
-import type { Category, Tier } from '../lib/types';
+import type { SeriesCategory, Tier } from '../lib/types';
 import { Cover } from './Cover';
 import { EmptyState } from './EmptyState';
 
@@ -26,14 +26,12 @@ const SORTS: { value: Sort; label: string }[] = [
   { value: 'week', label: 'This week' },
 ];
 
-/** `adult` is the 18+ category: the server only returns it when asked explicitly. */
-type CategoryFilter = 'all' | Exclude<Category, 'interesting'> | 'adult';
+type CategoryFilter = 'all' | SeriesCategory;
 const CATEGORIES: { value: CategoryFilter; label: string }[] = [
   { value: 'all', label: 'All' },
   { value: 'manga', label: 'Manga' },
   { value: 'manhwa', label: 'Manhwa' },
   { value: 'novel', label: 'Novels' },
-  { value: 'adult', label: '18+' },
 ];
 
 export function CommunityFeed() {
@@ -66,8 +64,7 @@ export function CommunityFeed() {
           sort,
           q: query,
           tier: tier === 'all' ? undefined : tier,
-          category: category === 'all' ? undefined : category === 'adult' ? 'interesting' : category,
-          adult: category === 'adult',
+          category: category === 'all' ? undefined : category,
           cursor: reset ? null : from,
         });
         if (mine !== run.current) return;
@@ -182,7 +179,7 @@ export function CommunityFeed() {
                   {item.title}
                 </Text>
                 <Text style={{ color: t.accent, fontSize: 12, fontWeight: '600' }}>
-                  {TIER_LABEL[item.tier]} · {item.category === 'interesting' ? '18+' : item.category}
+                  {TIER_LABEL[item.tier]} · {item.category}
                 </Text>
                 {item.note ? (
                   <Text numberOfLines={3} style={{ color: t.sub, fontSize: 13 }}>

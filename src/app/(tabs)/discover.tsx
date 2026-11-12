@@ -11,10 +11,8 @@ import { DEFAULT_SOURCES, getSource } from '../../lib/sources';
 import { useTheme } from '../../lib/theme';
 import type { Category, Series, SourceId } from '../../lib/types';
 
-type Top = 'default' | 'interesting';
-
 /** Loads a source page by page; restarts when the source or search changes. */
-function useBrowse(source: SourceId | undefined, query: string) {
+function useBrowse(source: SourceId | undefined, category: Category, query: string) {
   const [items, setItems] = useState<Series[]>([]);
   const [loading, setLoading] = useState(false);
   const [hasMore, setHasMore] = useState(false);
@@ -39,7 +37,7 @@ function useBrowse(source: SourceId | undefined, query: string) {
       setError(null);
       if (reset) setItems([]);
       try {
-        const res = await src.browse({ page: page.current, query });
+        const res = await src.browse({ page: page.current, query, category });
         if (mine !== run.current) return;
         page.current++;
         setItems((prev) => {
@@ -59,7 +57,7 @@ function useBrowse(source: SourceId | undefined, query: string) {
         }
       }
     },
-    [source, query],
+    [source, category, query],
   );
 
   useEffect(() => {
@@ -74,50 +72,34 @@ function useBrowse(source: SourceId | undefined, query: string) {
 export default function Discover() {
   const t = useTheme();
   const { recs } = useRecs();
-  const [top, setTop] = useState<Top>('default');
   const [category, setCategory] = useState<Category>('manga');
   const [query, setQuery] = useState('');
   const [pick, setPick] = useState<Partial<Record<Category, number>>>({});
 
-  const shown: Category = top === 'interesting' ? 'interesting' : category;
+  const shown = category;
   const choices: { source: SourceId; name?: string }[] = recs.sources?.[shown]?.length
     ? recs.sources[shown]!
     : DEFAULT_SOURCES[shown].map((source) => ({ source }));
   const chosen = choices[Math.min(pick[shown] ?? 0, Math.max(choices.length - 1, 0))];
   const source = chosen?.source;
 
-  const { items, loading, hasMore, error, more, reload } = useBrowse(source, query);
-
-  const changeTop = (v: Top) => {
-    setTop(v);
-    setQuery('');
-  };
+  const { items, loading, hasMore, error, more, reload } = useBrowse(source, shown, query);
 
   return (
     <View style={styles.flex}>
       <Segmented
-        variant="tabs"
-        value={top}
-        onChange={changeTop}
+        value={category}
+        onChange={(c) => {
+          setCategory(c);
+          setQuery('');
+        }}
         options={[
-          { value: 'default', label: 'Default' },
-          { value: 'interesting', label: 'Interesting' },
+          { value: 'manga', label: 'Manga' },
+          { value: 'manhwa', label: 'Manhwa' },
+          { value: 'isekai', label: 'Isekai' },
+          { value: 'novel', label: 'Novels' },
         ]}
       />
-      {top === 'default' ? (
-        <Segmented
-          value={category}
-          onChange={(c) => {
-            setCategory(c);
-            setQuery('');
-          }}
-          options={[
-            { value: 'manga', label: 'Manga' },
-            { value: 'manhwa', label: 'Manhwa' },
-            { value: 'novel', label: 'Novels' },
-          ]}
-        />
-      ) : null}
 
       {choices.length > 1 ? (
         <View style={styles.chips}>

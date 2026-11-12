@@ -1,11 +1,22 @@
 import { Ionicons } from '@expo/vector-icons';
 import { router } from 'expo-router';
-import { useState } from 'react';
-import { ActivityIndicator, Alert, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
+import { useEffect, useState } from 'react';
+import {
+  ActivityIndicator,
+  Alert,
+  Pressable,
+  ScrollView,
+  StyleSheet,
+  Switch,
+  Text,
+  TextInput,
+  View,
+} from 'react-native';
 
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { useAccount } from '../lib/account';
+import { getAdultSearch, setAdultSearch } from '../lib/adult';
 import { pickImportFile } from '../lib/backup';
 import { friendly } from '../lib/errors';
 import { clearTemp } from '../lib/files';
@@ -37,6 +48,27 @@ export default function Settings() {
   const updater = useUpdater();
   const account = useAccount();
   const [draft, setRecsUrl] = useState<string | null>(null);
+  const [adult, setAdult] = useState(false);
+  useEffect(() => {
+    getAdultSearch().then(setAdult);
+  }, []);
+  const changeAdult = (on: boolean) => {
+    if (!on) {
+      setAdult(false);
+      setAdultSearch(false);
+      return;
+    }
+    Alert.alert('Allow 18+ search results?', 'Only for readers 18 or older. Typed searches on MangaDex will include adult titles. Nothing adult is shown unless you search for it.', [
+      { text: 'Cancel', style: 'cancel' },
+      {
+        text: 'I’m 18 or older',
+        onPress: () => {
+          setAdult(true);
+          setAdultSearch(true);
+        },
+      },
+    ]);
+  };
   const recsUrl = draft ?? recs.url;
 
   const fail = (e: unknown) => Alert.alert('Something went wrong', friendly(e));
@@ -166,6 +198,15 @@ export default function Settings() {
       <Text style={{ color: recs.error ? t.danger : t.sub, fontSize: 12 }}>
         {recs.error ?? `${recs.recs.recommendations.length} recommendations${updated}`}
       </Text>
+
+      <Text style={[styles.section, { color: t.sub, marginTop: 20 }]}>SEARCH</Text>
+      <View style={[styles.folder, { backgroundColor: t.card }]}>
+        <View style={styles.folderInfo}>
+          <Text style={[styles.folderName, { color: t.text }]}>Include 18+ in search</Text>
+          <Text style={{ color: t.sub, fontSize: 12 }}>Off by default. Never shown while browsing.</Text>
+        </View>
+        <Switch value={adult} onValueChange={changeAdult} trackColor={{ true: t.accent }} />
+      </View>
 
       <Text style={[styles.section, { color: t.sub, marginTop: 20 }]}>STORAGE</Text>
       <Text style={[styles.hint, { color: t.sub }]}>

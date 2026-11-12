@@ -1,11 +1,13 @@
 import type { Category, Series, SourceId } from '../types';
-import { hentai20 } from './hentai20';
 import { mangadex } from './mangadex';
 import { novelfull } from './novelfull';
 import type { Source } from './types';
 import { webtoons } from './webtoons';
 
-const ALL: Record<Exclude<SourceId, 'external'>, Source> = { mangadex, webtoons, hentai20, novelfull };
+const ALL: Record<Exclude<SourceId, 'external'>, Source> = { mangadex, webtoons, novelfull };
+
+/** False for sources the app no longer ships (old saved data may still point at them). */
+export const isKnownSource = (id: string): boolean => id === 'external' || id in ALL;
 
 export const getSource = (id: SourceId): Source | undefined => (id === 'external' ? undefined : ALL[id]);
 
@@ -13,7 +15,7 @@ export const getSource = (id: SourceId): Source | undefined => (id === 'external
 export const DEFAULT_SOURCES: Record<Category, SourceId[]> = {
   manga: ['mangadex'],
   manhwa: ['webtoons'],
-  interesting: ['hentai20'],
+  isekai: ['mangadex'],
   novel: ['novelfull'],
 };
 
