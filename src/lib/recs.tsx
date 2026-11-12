@@ -11,9 +11,9 @@ export const DEFAULT_RECS_URL = `${API_BASE_URL}/recommendations.json`;
 
 const KEYS = { url: 'recsUrl1', cache: 'recsCache1' } as const;
 
-const CATEGORIES: Category[] = ['manga', 'manhwa', 'interesting', 'novel'];
+const CATEGORIES: Category[] = ['manga', 'manhwa', 'isekai', 'novel'];
 const TIERS: Tier[] = ['all-time', 'interesting', 'good', 'trial'];
-const SOURCES: SourceId[] = ['mangadex', 'webtoons', 'hentai20', 'novelfull', 'external'];
+const SOURCES: SourceId[] = ['mangadex', 'webtoons', 'novelfull', 'external'];
 
 export const TIER_LABEL: Record<Tier, string> = {
   'all-time': 'All-time',
@@ -79,7 +79,7 @@ export const toSeries = (r: Recommendation): Series => ({
   id: r.id,
   title: r.title,
   cover: r.cover,
-  category: r.category,
+  category: r.category === 'isekai' ? 'manga' : r.category,
   url: r.url,
 });
 

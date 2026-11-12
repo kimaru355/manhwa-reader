@@ -1,4 +1,4 @@
-import type { Chapter, Series, SourceId } from '../types';
+import type { Category, Chapter, Series, SourceId } from '../types';
 
 export type Page<T> = { items: T[]; hasMore: boolean };
 
@@ -9,7 +9,7 @@ export type Source = {
   kind?: 'text';
   /** Headers needed to fetch images (some hosts reject requests without a Referer). */
   imageHeaders: Record<string, string>;
-  browse: (opts: { page: number; query?: string }) => Promise<Page<Series>>;
+  browse: (opts: { page: number; query?: string; category?: Category }) => Promise<Page<Series>>;
   /** Oldest first. */
   chapters: (series: Series) => Promise<Chapter[]>;
   /** Image URLs in reading order. */

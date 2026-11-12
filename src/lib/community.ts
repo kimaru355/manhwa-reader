@@ -1,5 +1,5 @@
 import * as api from './api';
-import type { Category, Series, SourceId, Tier } from './types';
+import type { Series, SeriesCategory, SourceId, Tier } from './types';
 
 export type Sort = 'latest' | 'popular' | 'week';
 
@@ -10,7 +10,7 @@ export type CommunityRec = {
   title: string;
   cover: string | null;
   url: string | null;
-  category: Category;
+  category: SeriesCategory;
   tier: Tier;
   note: string | null;
   createdAt: string;
@@ -23,10 +23,8 @@ export type CommunityPage = { items: CommunityRec[]; nextCursor: string | null }
 export type CommunityFilters = {
   sort: Sort;
   q?: string;
-  category?: Category;
+  category?: SeriesCategory;
   tier?: Tier;
-  /** Only sent when the reader picked the adult category. */
-  adult?: boolean;
   cursor?: string | null;
 };
 
@@ -43,7 +41,6 @@ export const fetchCommunity = (f: CommunityFilters) =>
       q: f.q?.trim() || undefined,
       category: f.category,
       tier: f.tier,
-      adult: f.adult ? '1' : undefined,
       cursor: f.cursor ?? undefined,
       limit: '20',
     })}`,

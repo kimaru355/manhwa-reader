@@ -2,9 +2,24 @@
   "version": 1,
   "updated": "2026-11-11",
   "sources": {
-    "manga": [{ "source": "mangadex", "name": "MangaDex" }],
-    "manhwa": [{ "source": "webtoons", "name": "WEBTOON" }],
-    "interesting": [{ "source": "hentai20", "name": "Hentai20" }],
+    "manga": [
+      {
+        "source": "mangadex",
+        "name": "MangaDex"
+      }
+    ],
+    "manhwa": [
+      {
+        "source": "webtoons",
+        "name": "WEBTOON"
+      }
+    ],
+    "isekai": [
+      {
+        "source": "mangadex",
+        "name": "MangaDex"
+      }
+    ],
     "novel": []
   },
   "recommendations": [
@@ -95,43 +110,6 @@
       "tier": "trial"
     },
     {
-      "source": "hentai20",
-      "id": "secret-class",
-      "title": "Secret Class",
-      "category": "interesting",
-      "tier": "good",
-      "note": "SAMPLE: for Hentai20, id is the slug in hentai20.io/manga/<slug>/.",
-      "bookmarks": [
-        {
-          "chapterId": "secret-class-chapter-323",
-          "chapterName": "Chapter 323",
-          "page": 1,
-          "note": "SAMPLE: for Hentai20, chapterId is the chapter slug."
-        }
-      ]
-    },
-    {
-      "source": "hentai20",
-      "id": "my-ideal-type-is-my-friend-s-mom",
-      "title": "My Ideal Type is My Friend’s Mom",
-      "category": "interesting",
-      "tier": "trial"
-    },
-    {
-      "source": "hentai20",
-      "id": "sample-all-time",
-      "title": "SAMPLE interesting: all-time tier",
-      "category": "interesting",
-      "tier": "all-time"
-    },
-    {
-      "source": "hentai20",
-      "id": "sample-interesting",
-      "title": "SAMPLE interesting: interesting tier",
-      "category": "interesting",
-      "tier": "interesting"
-    },
-    {
       "source": "external",
       "id": "sample-novel-1",
       "title": "SAMPLE light novel: all-time tier",
@@ -148,6 +126,35 @@
       "url": "https://example.com/novel-2",
       "category": "novel",
       "tier": "good"
+    },
+    {
+      "source": "mangadex",
+      "id": "00000000-0000-0000-0000-000000000000",
+      "title": "SAMPLE isekai: all-time tier",
+      "category": "isekai",
+      "tier": "all-time",
+      "note": "SAMPLE: isekai titles are MangaDex titles, so id is the UUID in mangadex.org/title/<uuid>."
+    },
+    {
+      "source": "mangadex",
+      "id": "00000000-0000-0000-0000-000000000000",
+      "title": "SAMPLE isekai: interesting tier",
+      "category": "isekai",
+      "tier": "interesting"
+    },
+    {
+      "source": "mangadex",
+      "id": "00000000-0000-0000-0000-000000000000",
+      "title": "SAMPLE isekai: good tier",
+      "category": "isekai",
+      "tier": "good"
+    },
+    {
+      "source": "mangadex",
+      "id": "00000000-0000-0000-0000-000000000000",
+      "title": "SAMPLE isekai: trial tier",
+      "category": "isekai",
+      "tier": "trial"
     }
   ]
 }

@@ -3,11 +3,14 @@ export type Folder = {
   name: string;
 };
 
-/** What a title is. Home/Discover tabs are built from this. */
-export type Category = 'manga' | 'manhwa' | 'interesting' | 'novel';
+/** What a title is. Home/Discover tabs are built from this. `isekai` is a MangaDex genre shelf. */
+export type Category = 'manga' | 'manhwa' | 'isekai' | 'novel';
+
+/** What a title itself is (genre shelves like `isekai` are manga). */
+export type SeriesCategory = Exclude<Category, 'isekai'>;
 
 /** Where chapters come from. `external` titles have no reader; they open their link in the browser. */
-export type SourceId = 'mangadex' | 'webtoons' | 'hentai20' | 'novelfull' | 'external';
+export type SourceId = 'mangadex' | 'webtoons' | 'novelfull' | 'external';
 
 /** How strongly the author recommends a title. */
 export type Tier = 'all-time' | 'interesting' | 'good' | 'trial';
@@ -20,7 +23,7 @@ export type Series = {
   id: string;
   title: string;
   cover?: string;
-  category: Category;
+  category: SeriesCategory;
   /** Page of the title on its site (used for `external` titles). */
   url?: string;
 };
@@ -53,7 +56,8 @@ export type AuthorBookmark = {
   note?: string;
 };
 
-export type Recommendation = Omit<Series, 'key'> & {
+export type Recommendation = Omit<Series, 'key' | 'category'> & {
+  category: Category;
   tier: Tier;
   /** Why the author recommends it. */
   note?: string;

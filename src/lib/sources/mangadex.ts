@@ -1,4 +1,5 @@
-import type { Chapter, Series } from '../types';
+import { getAdultSearch } from '../adult';
+import type { Category, Chapter, Series } from '../types';
 import { getJson, qs } from './http';
 import type { Source } from './types';
 
@@ -6,10 +7,14 @@ const API = 'https://api.mangadex.org';
 const PAGE = 30;
 /** MangaDex sends browser-like clients to a bot check; a plain app User-Agent gets the API. */
 const HEADERS = { 'User-Agent': 'ManhwaReader/1.0' };
-const RATINGS = [
-  ['contentRating[]', 'safe'],
-  ['contentRating[]', 'suggestive'],
-] as const;
+const ratings = (adult: boolean) =>
+  (adult ? ['safe', 'suggestive', 'erotica', 'pornographic'] : ['safe', 'suggestive']).map(
+    (r) => ['contentRating[]', r] as const,
+  );
+/** MangaDex tag ids for the genre shelves (`GET /manga/tag`). */
+const GENRE_TAGS: Partial<Record<Category, string>> = {
+  isekai: 'ace04997-f6bd-436e-b261-779182193d3d',
+};
 
 type MdRel = { type: string; attributes?: { fileName?: string } };
 type MdManga = {
@@ -40,15 +45,19 @@ export const mangadex: Source = {
   name: 'MangaDex',
   imageHeaders: {},
 
-  async browse({ page, query }) {
+  async browse({ page, query, category }) {
     const q = query?.trim();
+    const tag = category && GENRE_TAGS[category];
+    // Only a typed search can reach 18+ titles, and only when the reader enabled it.
+    const adult = !!q && (await getAdultSearch());
     const params: (readonly [string, string | number])[] = [
       ['limit', PAGE],
       ['offset', page * PAGE],
       ['includes[]', 'cover_art'],
       ['availableTranslatedLanguage[]', 'en'],
       ['hasAvailableChapters', 'true'],
-      ...RATINGS,
+      ...ratings(adult),
+      ...(tag ? ([['includedTags[]', tag]] as const) : []),
       q ? ['title', q] : ['order[followedCount]', 'desc'],
     ];
     const res = await getJson<{ data: MdManga[]; total: number }>(`${API}/manga?${qs(params)}`, HEADERS);
@@ -56,6 +65,7 @@ export const mangadex: Source = {
   },
 
   async chapters(series) {
+    const adult = await getAdultSearch();
     type Feed = { id: string; attributes: { chapter: string | null; title: string | null; pages: number } };
     const out: Chapter[] = [];
     const seen = new Set<string>();
@@ -67,7 +77,7 @@ export const mangadex: Source = {
         ['order[volume]', 'asc'],
         ['order[chapter]', 'asc'],
         ['includeExternalUrl', 0],
-        ...RATINGS,
+        ...ratings(adult),
       ])}`;
       const res = await getJson<{ data: Feed[]; total: number }>(url, HEADERS);
       for (const c of res.data) {

@@ -13,7 +13,7 @@ it falls back to `src/data/recommendations.json`, which doubles as a sample of e
   "sources": {
     "manga": [{ "source": "mangadex", "name": "MangaDex" }],
     "manhwa": [{ "source": "webtoons", "name": "WEBTOON" }],
-    "interesting": [{ "source": "hentai20", "name": "Hentai20" }],
+    "isekai": [{ "source": "mangadex", "name": "MangaDex" }],
     "novel": []
   },
   "recommendations": [
@@ -34,20 +34,18 @@ it falls back to `src/data/recommendations.json`, which doubles as a sample of e
 ## Fields
 
 - `sources` — where Discover browses for each category. The first entry is the default; more than one shows a
-  source switcher. Optional; the app falls back to MangaDex / WEBTOON / Hentai20.
-- `category` — `manga`, `manhwa`, `interesting` or `novel`.
+  source switcher. Optional; the app falls back to MangaDex / WEBTOON / MangaDex (Isekai).
+- `category` — `manga`, `manhwa`, `isekai` or `novel`. `isekai` is a genre shelf: its titles are MangaDex titles, and Discover filters MangaDex by the Isekai tag.
 - `tier` — `all-time`, `interesting`, `good` or `trial`. Home groups each category by tier in that order.
-- `source` — `mangadex`, `webtoons`, `hentai20` or `external`. `external` titles (use this for light novels) have no
+- `source` — `mangadex`, `webtoons`, `novelfull` or `external`. `external` titles (use this for light novels) have no
   in-app reader: tapping one opens its `url` in the browser.
 - `id` — the title's id on that source:
   - MangaDex: the UUID in `mangadex.org/title/<uuid>`.
   - WEBTOON: the `title_no` from the title's list URL.
-  - Hentai20: the slug in `hentai20.io/manga/<slug>/`.
 - `cover` — optional. Without it the title shows a letter tile until opened.
 - `bookmarks` — the author's chapter bookmarks. `chapterId` is the source's chapter id:
   - MangaDex: the chapter UUID.
   - WEBTOON: the episode number (`episode_no`).
-  - Hentai20: the chapter slug, e.g. `secret-class-chapter-12`.
 
   `page` is the image number within the chapter (1-based). They show on the title page, in the reader's bookmark
   sheet and as a sparkle on the chapter row.

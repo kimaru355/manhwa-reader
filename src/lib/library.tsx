@@ -13,7 +13,15 @@ import {
 import { AppState } from 'react-native';
 
 import { exportSnapshot, readBackup, resolveBackupDir, writeBackup } from './backup';
+import { isKnownSource } from './sources';
 import type { Bookmark, Folder, Recent, Series, Snapshot } from './types';
+
+/** Drops entries from sources the app no longer supports (saved data, backups and restores). */
+const keepKnown = {
+  series: (list: Series[]) => list.filter((s) => isKnownSource(s.source)),
+  recents: (list: Recent[]) => list.filter((r) => isKnownSource(r.series.source)),
+  bookmarks: (list: Bookmark[]) => list.filter((b) => isKnownSource(b.seriesKey.split(':')[0])),
+};
 
 const KEYS = {
   favorites: 'favorites4',
@@ -141,10 +149,10 @@ export function LibraryProvider({ children }: { children: ReactNode }) {
       ]);
       setBackupDir(bdir);
       backupDirRef.current = bdir;
-      setFavorites(fav);
-      setRecents(rec);
-      setWishlist(wish);
-      setBookmarks(marks);
+      setFavorites(keepKnown.series(fav));
+      setRecents(keepKnown.recents(rec));
+      setWishlist(keepKnown.series(wish));
+      setBookmarks(keepKnown.bookmarks(marks));
       setReady(true);
     })();
   }, []);
@@ -219,7 +227,14 @@ export function LibraryProvider({ children }: { children: ReactNode }) {
     save(KEYS.recents, []);
   }, []);
 
-  const restoreSnapshot = useCallback((s: Snapshot) => {
+  const restoreSnapshot = useCallback((snap: Snapshot) => {
+    const s = {
+      ...snap,
+      favorites: keepKnown.series(snap.favorites),
+      wishlist: keepKnown.series(snap.wishlist),
+      recents: keepKnown.recents(snap.recents),
+      bookmarks: keepKnown.bookmarks(snap.bookmarks),
+    };
     setFavorites(s.favorites);
     setWishlist(s.wishlist);
     setRecents(s.recents);

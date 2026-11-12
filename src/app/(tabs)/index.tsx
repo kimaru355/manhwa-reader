@@ -11,12 +11,13 @@ import { openSeries } from '../../lib/series';
 import { useTheme } from '../../lib/theme';
 import type { Category, Series, Tier } from '../../lib/types';
 
-type Top = 'home' | 'interesting' | 'community';
+type Top = 'home' | 'community';
 
 const COLUMNS = 3;
 const CATEGORIES: { value: Category; label: string }[] = [
   { value: 'manga', label: 'Manga' },
   { value: 'manhwa', label: 'Manhwa' },
+  { value: 'isekai', label: 'Isekai' },
   { value: 'novel', label: 'Novels' },
 ];
 
@@ -27,7 +28,7 @@ export default function Home() {
   const { recs, loading, error, refresh } = useRecs();
   const [top, setTop] = useState<Top>('home');
   const [category, setCategory] = useState<Category>('manga');
-  const shown: Category = top === 'interesting' ? 'interesting' : category;
+  const shown = category;
 
   const rows = useMemo(() => {
     const out: Row[] = [];
@@ -52,7 +53,6 @@ export default function Home() {
         onChange={setTop}
         options={[
           { value: 'home', label: 'Home' },
-          { value: 'interesting', label: 'Interesting' },
           { value: 'community', label: 'Community' },
         ]}
       />
