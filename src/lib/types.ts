@@ -7,7 +7,7 @@ export type Folder = {
 export type Category = 'manga' | 'manhwa' | 'interesting' | 'novel';
 
 /** Where chapters come from. `external` titles have no reader; they open their link in the browser. */
-export type SourceId = 'mangadex' | 'webtoons' | 'hentai20' | 'novelfull' | 'external';
+export type SourceId = 'mangadex' | 'webtoons' | 'hentai20' | 'novelbin' | 'external';
 
 /** How strongly the author recommends a title. */
 export type Tier = 'all-time' | 'interesting' | 'good' | 'trial';

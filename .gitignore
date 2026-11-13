@@ -41,3 +41,7 @@ yarn-error.*
 /android
 
 .idea/
+
+# Release signing (never commit)
+keystore.properties
+keystore/

@@ -1,6 +1,6 @@
 // Local Windows builds (Android Studio / gradlew): CMake 3.22.1's ninja (1.10) can't create
 // paths > 260 chars, which breaks React Native codegen objects. Use CMake 3.31.6 (ninja 1.12,
-// long-path aware) and build arm64-v8a only. No-op on other platforms (e.g. EAS Linux builders).
+// long-path aware) and build the two ABIs real phones use (arm64-v8a, armeabi-v7a). No-op on other platforms (e.g. EAS Linux builders).
 // Requires "CMake 3.31.6" installed via Android Studio SDK Manager.
 const { withGradleProperties, withProjectBuildGradle, withAppBuildGradle } = require('expo/config-plugins');
 
@@ -12,7 +12,7 @@ module.exports = function withWindowsNativeBuild(config) {
 
   config = withGradleProperties(config, (c) => {
     const items = c.modResults.filter((i) => !(i.type === 'property' && i.key === 'reactNativeArchitectures'));
-    items.push({ type: 'property', key: 'reactNativeArchitectures', value: 'arm64-v8a' });
+    items.push({ type: 'property', key: 'reactNativeArchitectures', value: 'arm64-v8a,armeabi-v7a' });
     c.modResults = items;
     return c;
   });
