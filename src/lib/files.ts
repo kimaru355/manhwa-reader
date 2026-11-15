@@ -40,6 +40,9 @@ const FILE_TIMEOUT_MS = 45_000;
  */
 export async function downloadFile(url: string, dest: string, headers: Record<string, string>) {
   if (await exists(dest)) return;
+  // The download refuses to start unless the destination folder is already there ("Directory ... doesn't exist"),
+  // and the reader's cache folder for a chapter opened for the first time isn't, so every caller gets it made here.
+  await FS.makeDirectoryAsync(dest.slice(0, dest.lastIndexOf('/') + 1), { intermediates: true }).catch(() => {});
   const part = `${dest}.part`;
   let last: unknown;
   for (let attempt = 0; attempt < 3; attempt++) {

@@ -9,7 +9,7 @@ const OFFLINE = "Couldn't connect. Check your internet connection and try again.
 export function friendly(e: unknown): string {
   if (e instanceof FriendlyError) return e.message;
   const msg = String((e as Error)?.message ?? e ?? '');
-  if (/network request failed|failed to fetch|unknownhost|unable to resolve|timed? ?out|abort|offline|econn|enotfound|socket|ssl|connect/i.test(msg)) {
+  if (/network request failed|failed to fetch|unknownhost|unable to resolve|timed? ?out|abort|cancel|offline|econn|enotfound|socket|ssl|connect/i.test(msg)) {
     return OFFLINE;
   }
   const status = msg.match(/answered (\d{3})/)?.[1];
