@@ -5,14 +5,14 @@
 //
 // Run it after building the release (see docs/releasing.md). It reads the version from app.json.
 //   android/app/build/outputs/apk/release/app-arm64-v8a-release.apk   -> site/public/manhwa-reader-v<version>.apk
-//   android/app/build/outputs/apk/release/app-armeabi-v7a-release.apk -> site/public/manhwa-reader-32-bit-v-<version>.apk
+//   android/app/build/outputs/apk/release/app-armeabi-v7a-release.apk -> site/public/manhwa-reader-older-android-v<version>.apk
 // Older APKs in site/public are removed so the site repo doesn't keep growing.
 import { copyFileSync, existsSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 
 // Keep these in step with site/lib/apk.ts.
 export const standardApk = (v) => `manhwa-reader-v${v}.apk`;
-export const legacyApk = (v) => `manhwa-reader-32-bit-v-${v}.apk`;
+export const legacyApk = (v) => `manhwa-reader-older-android-v${v}.apk`;
 
 const root = new URL('..', import.meta.url).pathname.replace(/^\/([A-Za-z]:)/, '$1');
 const out = join(root, 'android/app/build/outputs/apk/release');
@@ -25,7 +25,7 @@ const notes = process.argv.slice(2).join(' ').trim();
 
 const builds = [
   { from: join(out, 'app-arm64-v8a-release.apk'), to: standardApk(version), label: 'most phones (64-bit)' },
-  { from: join(out, 'app-armeabi-v7a-release.apk'), to: legacyApk(version), label: 'older phones (32-bit)' },
+  { from: join(out, 'app-armeabi-v7a-release.apk'), to: legacyApk(version), label: 'older Android (32-bit)' },
 ];
 
 const fail = (msg) => {
@@ -47,7 +47,7 @@ if (Date.now() - built > 6 * 60 * 60 * 1000) {
 // Only files this script (or releases before 1.4.0) published are removed: older versions under the new names,
 // and the old single manhwa-reader.apk. Any other APK in the folder is left alone and listed.
 const keep = new Set(builds.map((b) => b.to));
-const ours = /^manhwa-reader(-32-bit)?-v-?\d+\.\d+\.\d+\.apk$/;
+const ours = /^manhwa-reader(-32-bit|-older-android)?-v-?\d+\.\d+\.\d+\.apk$/;
 for (const f of readdirSync(site)) {
   if (!f.endsWith('.apk') || keep.has(f)) continue;
   if (f === 'manhwa-reader.apk' || ours.test(f)) {

@@ -5,7 +5,7 @@ const MARK = '// [withAbiSplits]';
 /**
  * One release build makes two APKs instead of one large one:
  *   app-arm64-v8a-release.apk    -> most phones (64-bit)       -> manhwa-reader-v<version>.apk
- *   app-armeabi-v7a-release.apk  -> older phones (32-bit only) -> manhwa-reader-32-bit-v-<version>.apk
+ *   app-armeabi-v7a-release.apk  -> older phones (32-bit only) -> manhwa-reader-older-android-v<version>.apk
  * Both have the same versionCode, so either one updates an installed app. `npm run publish:apks` copies and
  * renames them into the website (see docs/releasing.md).
  *

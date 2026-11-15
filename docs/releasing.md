@@ -20,7 +20,7 @@ new key. Without `keystore.properties` a build falls back to the debug key.
 4. Put them on the website: `npm run publish:apks -- "Short notes about this version"`. This copies them into
    `site/public/` as
    - `manhwa-reader-v<version>.apk`
-   - `manhwa-reader-32-bit-v-<version>.apk`
+   - `manhwa-reader-older-android-v<version>.apk`
 
    writes `site/public/version.json` (versionCode, versionName, notes), and removes older published APKs.
 5. Commit and deploy the site. The app's update check reads `version.json`, and "Get it" opens the site's
