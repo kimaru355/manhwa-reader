@@ -68,7 +68,9 @@ export default function SeriesDetail() {
     else openReader(series, chapters[0].id);
   };
 
-  const addToDownloads = (list: typeof chapters) => {
+  const addToDownloads = async (list: typeof chapters) => {
+    // The first download asks where downloads are kept.
+    if (!(await dl.ensureFolder())) return;
     const n = dl.enqueue(series, list);
     if (n && Platform.OS === 'android') {
       ToastAndroid.show(`${n} chapter${n === 1 ? '' : 's'} added to Downloads`, ToastAndroid.SHORT);

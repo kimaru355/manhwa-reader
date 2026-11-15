@@ -2,15 +2,43 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as FS from 'expo-file-system/legacy';
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 
-import { AppState } from 'react-native';
+import { Alert, AppState } from 'react-native';
 
 import { backgroundTimeUp, startBackground, stopBackground, updateBackground } from './background';
+import {
+  folderSupported,
+  folderUsable,
+  pickDownloadFolder,
+  saveChapterToFolder,
+  saveCoverToFolder,
+  scanFolder,
+  STAGE,
+  stageDir,
+  writeManifest,
+} from './downloadFolder';
 import { friendly } from './errors';
-import { chapterDir, downloadFile, fetchPages, removeDir, seriesDir } from './files';
+import { chapterDir, downloadFile, fetchPages, fileExists, removeDir, seriesDir } from './files';
 import { getSource, imageHeaders } from './sources';
-import type { Chapter, DownloadedChapter, DownloadedSeries, Series } from './types';
+import type { Chapter, DownloadedChapter, DownloadedSeries, Folder, Series } from './types';
+import { hash } from './util';
 
-const KEYS = { legacyItems: 'downloads1', index: 'downloads2', queue: 'downloadQueue1', started: 'downloadStarted1' } as const;
+const KEYS = {
+  legacyItems: 'downloads1',
+  index: 'downloads2',
+  queue: 'downloadQueue1',
+  started: 'downloadStarted1',
+  folder: 'downloadFolder1',
+} as const;
+
+/** Where new downloads go: a folder the user picked, or the app's own storage (deleted on uninstall). */
+type FolderChoice = { mode: 'folder'; folder: Folder } | { mode: 'app' };
+
+/** Where a downloaded chapter's pages are, in reading order. */
+export const pageUris = (seriesKey: string, c: DownloadedChapter) => {
+  if (c.uris) return c.uris;
+  const dir = chapterDir(seriesKey, c.id, true);
+  return c.files.map((f) => `${dir}${f}`);
+};
 
 /**
  * Downloaded titles are stored one row per title (plus a row listing their keys in order). Android can't read
@@ -111,6 +139,23 @@ type DownloadsContext = {
   moveSeries: (seriesKey: string, direction: -1 | 1) => void;
   removeChapter: (seriesKey: string, chapterId: string) => void;
   removeSeries: (seriesKey: string) => void;
+  /** The folder new downloads are saved in; null means the app's own storage. */
+  folder: Folder | null;
+  /** Whether the user has decided where downloads go (a folder, or the app's storage). */
+  folderDecided: boolean;
+  /** Set when the chosen folder could no longer be opened (after a reinstall, or it was deleted). */
+  folderLost: boolean;
+  /** Progress of moving downloads from the app's storage into the folder. */
+  moving: { done: number; total: number } | null;
+  /**
+   * Lets the user pick a download folder. Downloads already in it are added to the list, and downloads in the
+   * app's storage are moved into it. Returns how many titles were found there, or null if cancelled.
+   */
+  chooseFolder: () => Promise<{ found: number } | null>;
+  /** Keeps new downloads in the app's storage. */
+  keepInAppStorage: () => void;
+  /** Asks where to save downloads if the user hasn't decided yet. Resolves false if they cancelled. */
+  ensureFolder: () => Promise<boolean>;
 };
 
 const Ctx = createContext<DownloadsContext | null>(null);
@@ -130,6 +175,12 @@ export function DownloadsProvider({ children }: { children: ReactNode }) {
   const startedRef = useRef(started);
   const running = useRef(false);
   const removed = useRef(new Set<string>());
+  const [choice, setChoice] = useState<FolderChoice | null>(null);
+  const choiceRef = useRef(choice);
+  const [folderLost, setFolderLost] = useState(false);
+  const [moving, setMoving] = useState<{ done: number; total: number } | null>(null);
+  const movingRef = useRef(false);
+  const folderOf = () => (choiceRef.current?.mode === 'folder' ? choiceRef.current.folder : null);
 
   /** Saves run one after another, so a later change is never overwritten by an earlier one finishing late. */
   const saving = useRef<Promise<void>>(Promise.resolve());
@@ -139,6 +190,30 @@ export function DownloadsProvider({ children }: { children: ReactNode }) {
     itemsRef.current = next;
     setItems(next);
     saving.current = saving.current.then(() => saveItems(prev, next)).catch(() => {});
+  }, []);
+
+  /** Rewrites the description of a title kept in the folder. One at a time, from the latest list. */
+  const manifests = useRef<Promise<void>>(Promise.resolve());
+  const refreshManifest = useCallback((seriesKey: string) => {
+    manifests.current = manifests.current
+      .then(() => {
+        const item = itemsRef.current.find((i) => i.series.key === seriesKey);
+        return item?.dir ? writeManifest(item) : undefined;
+      })
+      .catch(() => {});
+  }, []);
+
+  /** Changes one title in the list as it is now, so changes made meanwhile are not lost. */
+  const updateItem = useCallback(
+    (seriesKey: string, fn: (i: DownloadedSeries) => DownloadedSeries) =>
+      commitItems(itemsRef.current.map((i) => (i.series.key === seriesKey ? fn(i) : i))),
+    [commitItems],
+  );
+
+  const setFolderChoice = useCallback((next: FolderChoice) => {
+    choiceRef.current = next;
+    setChoice(next);
+    AsyncStorage.setItem(KEYS.folder, JSON.stringify(next)).catch(() => {});
   }, []);
 
   /** Applies a change to the queue; `persist` is skipped for page-by-page progress. */
@@ -164,16 +239,22 @@ export function DownloadsProvider({ children }: { children: ReactNode }) {
     [updateQueue],
   );
 
-  const saveCover = async (series: Series) => {
+  const saveCover = async (series: Series, folder: Folder | null) => {
+    // A cover already in the app's storage is moved into the folder along with the chapters.
     const existing = itemsRef.current.find((i) => i.series.key === series.key)?.cover;
     if (existing || !series.cover) return existing;
     try {
-      const dir = seriesDir(series.key);
+      const dir = folder ? `${STAGE}cover-${hash(series.key)}/` : seriesDir(series.key);
       await FS.makeDirectoryAsync(dir, { intermediates: true }).catch(() => {});
       const ext = series.cover.split(/[?#]/)[0].match(/\.(jpe?g|png|webp)$/i)?.[1] ?? 'jpg';
       const dest = `${dir}cover.${ext}`;
       await downloadFile(series.cover, dest, imageHeaders(series));
-      return dest;
+      if (!folder) return dest;
+      try {
+        return (await saveCoverToFolder(folder.uri, series, dest)).uri;
+      } finally {
+        removeDir(dir);
+      }
     } catch {
       return undefined;
     }
@@ -189,28 +270,45 @@ export function DownloadsProvider({ children }: { children: ReactNode }) {
     try {
       const urls = await source.pages(job.series, job.chapter);
       if (shouldStop()) throw new Error('Cancelled');
-      const dir = chapterDir(job.series.key, job.chapter.id, true);
+      // With a download folder, pages are gathered in the app's cache and copied over once they are all in.
+      const folder = folderOf();
+      const dir = folder ? stageDir(job.series.key, job.chapter.id) : chapterDir(job.series.key, job.chapter.id, true);
       const files = await fetchPages(urls, dir, source.imageHeaders, (done, total) => {
         patch(k, { done, total });
         updateBackground(`${job.series.title} · ${job.chapter.name} · ${done}/${total} pages`, done, total);
       }, shouldStop);
-      const cover = await saveCover(job.series);
-      const saved: DownloadedChapter = { ...job.chapter, files, ts: Date.now() };
+      let saved: DownloadedChapter = { ...job.chapter, files, ts: Date.now() };
+      let folderDir: string | undefined;
+      if (folder) {
+        updateBackground(`${job.series.title} · ${job.chapter.name} · saving to folder`, files.length, files.length);
+        const res = await saveChapterToFolder(folder.uri, job.series, job.chapter, dir, files);
+        saved = { ...saved, dir: res.dir, uris: res.uris };
+        folderDir = res.seriesDir;
+        removeDir(dir);
+      }
+      const cover = await saveCover(job.series, folder);
       const list = itemsRef.current;
       const found = list.find((i) => i.series.key === job.series.key);
       commitItems(
         found
           ? list.map((i) =>
               i === found
-                ? { ...i, cover: cover ?? i.cover, chapters: [...i.chapters.filter((c) => c.id !== saved.id), saved] }
+                ? {
+                    ...i,
+                    cover: cover ?? i.cover,
+                    dir: folderDir ?? i.dir,
+                    chapters: [...i.chapters.filter((c) => c.id !== saved.id), saved],
+                  }
                 : i,
             )
-          : [{ series: job.series, cover, chapters: [saved] }, ...list],
+          : [{ series: job.series, cover, ...(folderDir ? { dir: folderDir } : {}), chapters: [saved] }, ...list],
       );
+      if (folderDir) refreshManifest(job.series.key);
       updateQueue((q) => q.filter((j) => keyOf(j) !== k));
     } catch (e) {
       if (removed.current.has(k)) {
         await removeDir(chapterDir(job.series.key, job.chapter.id, true));
+        await removeDir(stageDir(job.series.key, job.chapter.id));
         updateQueue((q) => q.filter((j) => keyOf(j) !== k));
       } else if (!startedRef.current.includes(job.series.key)) {
         patch(k, { state: 'queued' });
@@ -252,11 +350,26 @@ export function DownloadsProvider({ children }: { children: ReactNode }) {
   // Restore everything, then pick up where an interrupted download stopped.
   useEffect(() => {
     (async () => {
-      const [saved, rawQueue, rawStarted] = await Promise.all([
+      const [saved, rawQueue, rawStarted, rawChoice] = await Promise.all([
         loadItems(),
         readJson<unknown>(KEYS.queue, []),
         readJson<unknown>(KEYS.started, []),
+        readJson<FolderChoice | null>(KEYS.folder, null),
       ]);
+      if (rawChoice?.mode === 'app') {
+        choiceRef.current = rawChoice;
+        setChoice(rawChoice);
+      } else if (rawChoice?.mode === 'folder' && typeof rawChoice.folder?.uri === 'string') {
+        // Access to the folder does not survive a reinstall (the setting itself can, through Android's backup),
+        // so the user is asked again before the next download.
+        if (folderSupported && (await folderUsable(rawChoice.folder.uri))) {
+          choiceRef.current = rawChoice;
+          setChoice(rawChoice);
+        } else {
+          setFolderLost(true);
+          AsyncStorage.removeItem(KEYS.folder).catch(() => {});
+        }
+      }
       const q = (Array.isArray(rawQueue) ? (rawQueue as Job[]) : []).filter((j) => j?.series?.key && j?.chapter?.id);
       const s = Array.isArray(rawStarted) ? rawStarted.filter((k): k is string => typeof k === 'string') : [];
       itemsRef.current = saved;
@@ -316,7 +429,10 @@ export function DownloadsProvider({ children }: { children: ReactNode }) {
       const job = queueRef.current.find((j) => keyOf(j) === k);
       if (!job) return;
       if (job.state === 'active') removed.current.add(k);
-      else removeDir(chapterDir(job.series.key, job.chapter.id, true));
+      else {
+        removeDir(chapterDir(job.series.key, job.chapter.id, true));
+        removeDir(stageDir(job.series.key, job.chapter.id));
+      }
       if (job.state !== 'active') updateQueue((q) => q.filter((j) => keyOf(j) !== k));
     },
     [updateQueue],
@@ -357,22 +473,153 @@ export function DownloadsProvider({ children }: { children: ReactNode }) {
 
   const removeChapter = useCallback(
     (seriesKey: string, chapterId: string) => {
-      removeDir(chapterDir(seriesKey, chapterId, true));
+      const item = itemsRef.current.find((i) => i.series.key === seriesKey);
+      const chapter = item?.chapters.find((c) => c.id === chapterId);
+      removeDir(chapter?.dir ?? chapterDir(seriesKey, chapterId, true));
       const next = itemsRef.current
         .map((i) => (i.series.key === seriesKey ? { ...i, chapters: i.chapters.filter((c) => c.id !== chapterId) } : i))
         .filter((i) => i.chapters.length > 0);
-      if (!next.some((i) => i.series.key === seriesKey)) removeDir(seriesDir(seriesKey));
+      const left = next.some((i) => i.series.key === seriesKey);
+      if (!left) {
+        removeDir(seriesDir(seriesKey));
+        if (item?.dir) removeDir(item.dir);
+      }
       commitItems(next);
+      if (left && item?.dir) refreshManifest(seriesKey);
     },
-    [commitItems],
+    [commitItems, refreshManifest],
   );
 
   const removeSeries = useCallback(
     (seriesKey: string) => {
+      const item = itemsRef.current.find((i) => i.series.key === seriesKey);
       removeDir(seriesDir(seriesKey));
+      if (item?.dir) removeDir(item.dir);
       commitItems(itemsRef.current.filter((i) => i.series.key !== seriesKey));
     },
     [commitItems],
+  );
+
+  /** Moves chapters and covers kept in the app's storage into the folder, one chapter at a time. */
+  const moveIntoFolder = useCallback(
+    async (folder: Folder) => {
+      if (movingRef.current) return;
+      movingRef.current = true;
+      const total = itemsRef.current.reduce((n, i) => n + i.chapters.filter((c) => !c.uris).length, 0);
+      let done = 0;
+      if (total) setMoving({ done, total });
+      try {
+        for (const key of itemsRef.current.map((i) => i.series.key)) {
+          const item = itemsRef.current.find((i) => i.series.key === key);
+          if (!item) continue;
+          let moved = false;
+          for (const c of item.chapters.filter((x) => !x.uris)) {
+            // Stops if the user picked another folder or switched to the app's storage meanwhile.
+            if (folderOf()?.uri !== folder.uri) return;
+            // Deleted by the user while waiting.
+            if (!itemsRef.current.find((i) => i.series.key === key)?.chapters.some((x) => x.id === c.id && !x.uris)) continue;
+            const local = chapterDir(key, c.id, true);
+            try {
+              const intact = (await Promise.all(c.files.map((f) => fileExists(`${local}${f}`)))).every(Boolean);
+              if (intact) {
+                const res = await saveChapterToFolder(folder.uri, item.series, c, local, c.files);
+                updateItem(key, (i) => ({
+                  ...i,
+                  dir: res.seriesDir,
+                  chapters: i.chapters.map((x) => (x.id === c.id ? { ...x, dir: res.dir, uris: res.uris } : x)),
+                }));
+                moved = true;
+                await removeDir(local);
+              }
+            } catch {
+              // Stays in the app's storage; it is tried again the next time a folder is chosen.
+            }
+            setMoving({ done: ++done, total });
+          }
+          const now = itemsRef.current.find((i) => i.series.key === key);
+          if (now?.cover?.startsWith('file:')) {
+            try {
+              const res = await saveCoverToFolder(folder.uri, now.series, now.cover);
+              updateItem(key, (i) => ({ ...i, dir: i.dir ?? res.seriesDir, cover: res.uri }));
+              moved = true;
+            } catch {}
+          }
+          const after = itemsRef.current.find((i) => i.series.key === key);
+          if (after && after.chapters.every((x) => x.uris) && !after.cover?.startsWith('file:')) removeDir(seriesDir(key));
+          if (moved) refreshManifest(key);
+        }
+      } finally {
+        movingRef.current = false;
+        setMoving(null);
+      }
+    },
+    [refreshManifest, updateItem],
+  );
+
+  const chooseFolder = useCallback(async () => {
+    const folder = await pickDownloadFolder();
+    if (!folder) return null;
+    // Downloads already in the folder (from before a reinstall, or another phone) join the list.
+    const found = await scanFolder(folder.uri);
+    let list = itemsRef.current;
+    for (const f of found) {
+      const have = list.find((i) => i.series.key === f.series.key);
+      if (!have) {
+        list = [...list, f];
+        continue;
+      }
+      const inFolder = new Set(have.chapters.filter((c) => c.uris).map((c) => c.id));
+      const fresh = f.chapters.filter((c) => !inFolder.has(c.id));
+      const freshIds = new Set(fresh.map((c) => c.id));
+      // The folder's copy of a chapter replaces one in the app's storage, which is deleted.
+      for (const c of have.chapters) if (freshIds.has(c.id)) removeDir(chapterDir(f.series.key, c.id, true));
+      list = list.map((i) =>
+        i === have
+          ? {
+              ...i,
+              dir: i.dir ?? f.dir,
+              cover: i.cover?.startsWith('content:') ? i.cover : (f.cover ?? i.cover),
+              chapters: [...i.chapters.filter((c) => !freshIds.has(c.id)), ...fresh],
+            }
+          : i,
+      );
+    }
+    if (found.length) commitItems(list);
+    setFolderLost(false);
+    setFolderChoice({ mode: 'folder', folder });
+    moveIntoFolder(folder);
+    return { found: found.length };
+  }, [commitItems, moveIntoFolder, setFolderChoice]);
+
+  const keepInAppStorage = useCallback(() => setFolderChoice({ mode: 'app' }), [setFolderChoice]);
+
+  const ensureFolder = useCallback(
+    () =>
+      new Promise<boolean>((resolve) => {
+        if (!folderSupported || choiceRef.current) return resolve(true);
+        Alert.alert(
+          'Where should downloads be saved?',
+          'Choose a folder on your phone to keep downloaded chapters even if the app is uninstalled. ' +
+            'If you used a folder before reinstalling, choose it again to get those chapters back.\n\n' +
+            'Chapters kept in the app’s storage are deleted when the app is uninstalled. You can change this in Settings.',
+          [
+            { text: 'Cancel', style: 'cancel', onPress: () => resolve(false) },
+            { text: 'App storage', onPress: () => (keepInAppStorage(), resolve(true)) },
+            {
+              text: 'Choose folder',
+              onPress: () =>
+                chooseFolder()
+                  .then((r) => resolve(!!r))
+                  .catch((e) => {
+                    Alert.alert('Couldn’t use that folder', friendly(e));
+                    resolve(false);
+                  }),
+            },
+          ],
+          { cancelable: true, onDismiss: () => resolve(false) },
+        );
+      }),
+    [chooseFolder, keepInAppStorage],
   );
 
   const value = useMemo<DownloadsContext>(() => {
@@ -394,8 +641,34 @@ export function DownloadsProvider({ children }: { children: ReactNode }) {
       moveSeries,
       removeChapter,
       removeSeries,
+      folder: choice?.mode === 'folder' ? choice.folder : null,
+      folderDecided: !folderSupported || !!choice,
+      folderLost,
+      moving,
+      chooseFolder,
+      keepInAppStorage,
+      ensureFolder,
     };
-  }, [items, queue, started, enqueue, start, stop, cancel, cancelSeries, retry, moveSeries, removeChapter, removeSeries]);
+  }, [
+    items,
+    queue,
+    started,
+    enqueue,
+    start,
+    stop,
+    cancel,
+    cancelSeries,
+    retry,
+    moveSeries,
+    removeChapter,
+    removeSeries,
+    choice,
+    folderLost,
+    moving,
+    chooseFolder,
+    keepInAppStorage,
+    ensureFolder,
+  ]);
 
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>;
 }

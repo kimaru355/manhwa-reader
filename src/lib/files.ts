@@ -1,3 +1,4 @@
+import { File } from 'expo-file-system';
 import * as FS from 'expo-file-system/legacy';
 
 import { FriendlyError, friendly } from './errors';
@@ -19,8 +20,16 @@ async function exists(path: string) {
   return info.exists && (info as { size?: number }).size !== 0;
 }
 
-/** Whether a non-empty file is at `path`. Never throws. */
-export const fileExists = (path: string) => exists(path).catch(() => false);
+/** Whether a non-empty file is at `path` (a file in the app's storage, or one in the download folder). Never throws. */
+export const fileExists = async (path: string) => {
+  try {
+    // Checking a folder file the old way opens it (and leaves it open), so it is only looked up.
+    if (path.startsWith('content:')) return new File(path).exists;
+    return await exists(path);
+  } catch {
+    return false;
+  }
+};
 
 const FILE_TIMEOUT_MS = 45_000;
 

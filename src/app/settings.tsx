@@ -7,6 +7,8 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { useAccount } from '../lib/account';
 import { pickImportFile } from '../lib/backup';
+import { folderSupported } from '../lib/downloadFolder';
+import { useDownloads } from '../lib/downloads';
 import { friendly } from '../lib/errors';
 import { clearTemp } from '../lib/files';
 import { useLibrary } from '../lib/library';
@@ -39,6 +41,7 @@ export default function Settings() {
   const recs = useRecs();
   const updater = useUpdater();
   const account = useAccount();
+  const dl = useDownloads();
   const [draft, setRecsUrl] = useState<string | null>(null);
   const [sharing, setSharing] = useState(false);
   const recsUrl = draft ?? recs.url;
@@ -61,6 +64,17 @@ export default function Settings() {
       ]);
     } catch (e) {
       fail(e);
+    }
+  };
+
+  const chooseFolder = async () => {
+    try {
+      const res = await dl.chooseFolder();
+      if (res?.found) {
+        Alert.alert('Downloads found', `${res.found} downloaded title${res.found === 1 ? ' was' : 's were'} found in that folder and added to Downloads.`);
+      }
+    } catch (e) {
+      Alert.alert('Couldn’t use that folder', friendly(e));
     }
   };
 
@@ -279,6 +293,60 @@ export default function Settings() {
         <Text style={{ color: recs.error ? t.danger : t.sub, fontSize: 12 }}>
           {recs.error ?? `${recs.recs.recommendations.length} recommendations${updated}`}
         </Text>
+
+        {/* ---------------------------------------------------------------- Download folder */}
+        {folderSupported ? (
+          <>
+            <Text style={[styles.section, { color: t.sub, marginTop: 20 }]}>DOWNLOAD FOLDER</Text>
+            <Text style={[styles.hint, { color: t.sub }]}>
+              Downloaded chapters saved in a folder you choose stay on your phone even if the app is uninstalled.
+              After a reinstall, choose the same folder to get them back. Chapters in the app’s storage are deleted
+              with the app.
+            </Text>
+            <View style={[styles.card, { backgroundColor: t.card }]}>
+              <Ionicons name={dl.folder ? 'folder-outline' : 'phone-portrait-outline'} size={26} color={t.accent} />
+              <View style={styles.cardInfo}>
+                <Text numberOfLines={2} style={[styles.cardTitle, { color: t.text }]}>
+                  {dl.folder ? dl.folder.name : dl.folderDecided ? 'App storage' : 'Not chosen yet'}
+                </Text>
+                <Text style={{ color: dl.folderLost && !dl.folder ? t.danger : t.sub, fontSize: 12 }}>
+                  {dl.moving
+                    ? `Moving downloads into the folder… ${dl.moving.done}/${dl.moving.total}`
+                    : dl.folderLost && !dl.folder
+                      ? 'The app can no longer open your download folder. Choose it again.'
+                      : dl.folder
+                        ? 'New downloads are saved here.'
+                        : dl.folderDecided
+                          ? 'Deleted if the app is uninstalled.'
+                          : 'You’ll be asked before your first download.'}
+                </Text>
+              </View>
+              {dl.moving ? <ActivityIndicator color={t.accent} size="small" /> : null}
+            </View>
+            <Pressable onPress={chooseFolder} style={[styles.secondary, { borderColor: t.border }]}>
+              <Ionicons name="folder-open-outline" size={18} color={t.text} />
+              <Text style={{ color: t.text, fontSize: 15 }}>{dl.folder ? 'Change download folder' : 'Choose download folder'}</Text>
+            </Pressable>
+            {dl.folder ? (
+              <Pressable
+                onPress={() =>
+                  Alert.alert(
+                    'Save new downloads in the app?',
+                    'Chapters already in the folder stay there. New ones are deleted if the app is uninstalled.',
+                    [
+                      { text: 'Cancel', style: 'cancel' },
+                      { text: 'Use app storage', onPress: dl.keepInAppStorage },
+                    ],
+                  )
+                }
+                style={[styles.secondary, { borderColor: t.border }]}
+              >
+                <Ionicons name="phone-portrait-outline" size={18} color={t.text} />
+                <Text style={{ color: t.text, fontSize: 15 }}>Use app storage instead</Text>
+              </Pressable>
+            ) : null}
+          </>
+        ) : null}
 
         {/* ---------------------------------------------------------------- Storage */}
         <Text style={[styles.section, { color: t.sub, marginTop: 20 }]}>STORAGE</Text>

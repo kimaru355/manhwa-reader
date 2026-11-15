@@ -25,7 +25,7 @@ import { BookmarksSheet } from '../components/BookmarksSheet';
 import { StatusPill } from '../components/StatusPill';
 import { useAccount } from '../lib/account';
 import { submitBookmark } from '../lib/community';
-import { useDownloads } from '../lib/downloads';
+import { pageUris, useDownloads } from '../lib/downloads';
 import { friendly, FriendlyError, toastError } from '../lib/errors';
 import { chapterDir, downloadFile, fileExists, markDone, pageName, pruneTemp, readDone, removeDir } from '../lib/files';
 import { useLibrary } from '../lib/library';
@@ -108,14 +108,15 @@ export default function Reader() {
       let dir: string;
       let names: string[];
       let urls: string[] | null = null;
-      // A downloaded chapter whose files went missing (storage cleaned, partial restore) is read online instead.
-      const savedDir = saved ? chapterDir(series.key, chapter.id, true) : '';
-      const savedIntact =
-        !!saved &&
-        (await Promise.all(saved.files.map((f) => fileExists(`${savedDir}${f}`)))).every(Boolean);
+      /** Addresses of the pages of a downloaded chapter (in the app's storage or the download folder). */
+      let savedUris: string[] | null = null;
+      // A downloaded chapter whose files went missing (storage cleaned, folder deleted) is read online instead.
+      const savedPages = saved ? pageUris(series.key, saved) : [];
+      const savedIntact = !!saved && (await Promise.all(savedPages.map(fileExists))).every(Boolean);
       if (saved && (savedIntact || !source)) {
-        dir = savedDir;
+        dir = '';
         names = saved.files;
+        savedUris = savedPages;
       } else {
         dir = chapterDir(series.key, chapter.id, false);
         const done = await readDone(dir);
@@ -147,7 +148,7 @@ export default function Reader() {
 
       // Downloads one page (if it is not on disk yet) at full quality and measures it.
       const fetchOne = async (i: number): Promise<boolean> => {
-        const uri = `${dir}${names[i]}`;
+        const uri = savedUris ? savedUris[i] : `${dir}${names[i]}`;
         if (state[i].failed) {
           state[i] = { uri: null, ratio: null, failed: false };
           publish();

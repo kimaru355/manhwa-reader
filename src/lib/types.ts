@@ -97,12 +97,20 @@ export type DownloadedChapter = Chapter & {
   /** File names inside the chapter's folder, in reading order. */
   files: string[];
   ts: number;
+  /**
+   * Set when the chapter is in the download folder the user chose: that folder's address, and one address per
+   * page in reading order. Chapters without it are in the app's own storage (`files` inside `chapterDir`).
+   */
+  dir?: string;
+  uris?: string[];
 };
 
 export type DownloadedSeries = {
   series: Series;
   /** Cover saved on the device so it shows offline. */
   cover?: string;
+  /** The title's folder inside the download folder, once a chapter has been saved there. */
+  dir?: string;
   chapters: DownloadedChapter[];
 };
 
