@@ -5,7 +5,10 @@ import { ActivityIndicator, Alert, FlatList, Platform, Pressable, StyleSheet, Te
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { Cover } from '../components/Cover';
+import { Comments } from '../components/Comments';
 import { RecommendSheet } from '../components/RecommendSheet';
+import { Votes } from '../components/Votes';
+import { authorRecId } from '../lib/reactions';
 import { EmptyState } from '../components/EmptyState';
 import { useAccount } from '../lib/account';
 import { useDownloads } from '../lib/downloads';
@@ -62,6 +65,75 @@ export default function SeriesDetail() {
   const textOnly = getSource(series.source)?.kind === 'text';
   const sourceName = getSource(series.source)?.name ?? series.source;
 
+  const renderChapter = ({ item: { c, i } }: { item: (typeof rows)[number] }) => {
+    const current = resumeIdx === i;
+    const read = resumeIdx >= 0 && i < resumeIdx;
+    const marks = marksByChapter.get(c.id) ?? [];
+    const authorMarks = authorByChapter.get(c.id) ?? [];
+    const crowd = communityByChapter.get(c.id) ?? [];
+    const notes = [...authorMarks.map((b) => b?.note), ...crowd.map((b) => b.note), ...marks.map((b) => b.note)]
+      .filter(Boolean)
+      .join(' · ');
+    const saved = dl.getChapter(series.key, c.id);
+    const job = dl.getJob(series.key, c.id);
+    return (
+      <Pressable
+        style={[styles.chapter, { borderBottomColor: t.border }]}
+        onPress={() => openReader(series, c.id, current ? progress!.page : 1)}
+        onLongPress={saved ? () => confirmDeleteChapter(c.id, c.name) : undefined}
+      >
+        <View style={styles.chapterText}>
+          <Text numberOfLines={1} style={[styles.chapterName, { color: read ? t.sub : t.text }]}>
+            {c.name}
+          </Text>
+          {notes ? (
+            <Text numberOfLines={1} style={[styles.chapterNote, { color: t.accent }]}>
+              {notes}
+            </Text>
+          ) : null}
+        </View>
+        {authorMarks.length ? <Ionicons name="sparkles" size={16} color={t.accent} /> : null}
+        {crowd.length ? <Ionicons name="people" size={16} color={t.accent} /> : null}
+        {marks.length ? <Ionicons name="bookmark" size={16} color={t.accent} /> : null}
+        {current ? (
+          textOnly ? (
+            <Ionicons name="bookmark" size={16} color={t.accent} />
+          ) : (
+            <Text style={{ color: t.accent, fontSize: 12 }}>
+              p.{progress!.page}/{progress!.total || '?'}
+            </Text>
+          )
+        ) : read ? (
+          <Ionicons name="checkmark-circle" size={18} color={t.sub} />
+        ) : null}
+        {saved ? (
+          <Ionicons name="checkmark-done-circle" size={22} color={t.accent} />
+        ) : job ? (
+          <Pressable
+            hitSlop={10}
+            onPress={() => (job.state === 'error' ? dl.retry(series.key, c.id) : dl.cancel(series.key, c.id))}
+            style={styles.jobBtn}
+          >
+            {job.state === 'error' ? (
+              <Ionicons name="refresh-circle" size={22} color={t.danger} />
+            ) : job.state === 'active' ? (
+              <>
+                <ActivityIndicator size="small" color={t.accent} />
+                <Text style={{ color: t.sub, fontSize: 11 }}>{job.total ? `${job.done}/${job.total}` : '…'}</Text>
+              </>
+            ) : (
+              <Ionicons name="time-outline" size={22} color={t.sub} />
+            )}
+          </Pressable>
+        ) : textOnly ? null : (
+          <Pressable hitSlop={10} onPress={() => addToDownloads([c])}>
+            <Ionicons name="download-outline" size={22} color={t.sub} />
+          </Pressable>
+        )}
+      </Pressable>
+    );
+  };
+
   const startReading = () => {
     if (!chapters.length) return;
     if (progress && resumeIdx >= 0) openReader(series, progress.chapterId, progress.page);
@@ -101,6 +173,138 @@ export default function SeriesDetail() {
       { text: 'Delete', style: 'destructive', onPress: () => dl.removeChapter(series.key, id) },
     ]);
 
+  const header = (
+    <View>
+      <View style={styles.hero}>
+        <Cover series={series} style={styles.cover} />
+        <View style={styles.heroInfo}>
+          <Text style={[styles.title, { color: t.text }]}>{series.title}</Text>
+          <Text style={{ color: t.sub }}>
+            {sourceName}
+            {chapters.length ? ` · ${chapters.length} chapters` : ''}
+            {communityMarks.length ? ` · ${communityMarks.length} community bookmark${communityMarks.length === 1 ? '' : 's'}` : ''}
+          </Text>
+          {rec ? (
+            <View style={[styles.tier, { backgroundColor: t.card }]}>
+              <Ionicons name="sparkles" size={12} color={t.accent} />
+              <Text style={{ color: t.accent, fontSize: 12, fontWeight: '600' }}>{TIER_LABEL[rec.tier]}</Text>
+            </View>
+          ) : null}
+          {rec ? <Votes type="author_rec" id={authorRecId(series.source, series.id)} /> : null}
+          {progress && resumeIdx >= 0 ? (
+            <Text numberOfLines={1} style={{ color: t.sub }}>
+              Read to {chapters[resumeIdx].name}
+            </Text>
+          ) : null}
+        </View>
+      </View>
+
+      {rec?.note ? (
+        <View style={[styles.note, { backgroundColor: t.card }]}>
+          <Text style={{ color: t.sub, fontSize: 12, fontWeight: '700', marginBottom: 4 }}>AUTHOR’S NOTE</Text>
+          <Text style={{ color: t.text, lineHeight: 20 }}>{rec.note}</Text>
+        </View>
+      ) : null}
+
+      <Pressable
+        disabled={!chapters.length}
+        style={[styles.cta, { backgroundColor: t.accent, opacity: chapters.length ? 1 : 0.5 }]}
+        onPress={startReading}
+      >
+        <Ionicons name="book" size={18} color="#fff" />
+        <Text style={styles.ctaText} numberOfLines={1}>
+          {progress && resumeIdx >= 0 ? `Continue · ${chapters[resumeIdx].name}` : 'Start reading'}
+        </Text>
+      </Pressable>
+
+      {chapters.length && !textOnly ? (
+        <View style={styles.actions}>
+          <Pressable
+            disabled={!pending.length}
+            onPress={downloadAll}
+            style={[styles.action, { borderColor: t.border, opacity: pending.length ? 1 : 0.5 }]}
+          >
+            <Ionicons name="download-outline" size={18} color={t.text} />
+            <Text style={{ color: t.text }}>{pending.length ? 'Download all' : 'All downloaded'}</Text>
+          </Pressable>
+          {waiting.length ? (
+            <Pressable
+              onPress={() => (running ? dl.stop(series.key) : dl.start(series.key))}
+              style={[styles.action, { borderColor: t.accent }]}
+            >
+              <Ionicons name={running ? 'pause' : 'play'} size={18} color={t.accent} />
+              <Text style={{ color: t.accent }}>
+                {running ? 'Pause' : 'Start'} ({waiting.length})
+              </Text>
+            </Pressable>
+          ) : null}
+          {savedCount ? (
+            <Pressable
+              onPress={() =>
+                Alert.alert('Delete all downloads?', `Removes ${savedCount} saved chapters from this phone.`, [
+                  { text: 'Cancel', style: 'cancel' },
+                  { text: 'Delete', style: 'destructive', onPress: () => dl.removeSeries(series.key) },
+                ])
+              }
+              style={[styles.action, { borderColor: t.border }]}
+            >
+              <Ionicons name="trash-outline" size={18} color={t.danger} />
+              <Text style={{ color: t.danger }}>Delete downloads</Text>
+            </Pressable>
+          ) : null}
+        </View>
+      ) : null}
+
+      {account.enabled ? (
+        <Pressable onPress={openRecommend} style={[styles.action, { borderColor: t.border, marginHorizontal: 16, marginTop: 10 }]}>
+          <Ionicons name="sparkles-outline" size={18} color={t.text} />
+          <Text style={{ color: t.text }}>Recommend this title</Text>
+        </Pressable>
+      ) : null}
+
+      {offline && chapters.length ? (
+        <Text style={[styles.offline, { color: t.sub }]}>Offline — showing downloaded chapters only.</Text>
+      ) : null}
+
+      <View style={styles.listHead}>
+        <Text style={[styles.listTitle, { color: t.text }]}>Chapters</Text>
+        <Pressable style={styles.sort} onPress={() => setNewestFirst((v) => !v)}>
+          <Ionicons name={newestFirst ? 'arrow-down' : 'arrow-up'} size={16} color={t.sub} />
+          <Text style={{ color: t.sub }}>{newestFirst ? 'Newest first' : 'Oldest first'}</Text>
+        </Pressable>
+      </View>
+    </View>
+  );
+
+  // The chapters sit in their own scrolling window so a title with hundreds of chapters doesn't push the
+  // comments far down. It is as tall as the chapters need, up to about eight rows.
+  const chapterWindow = rows.length ? (
+    <View style={[styles.window, { borderColor: t.border, height: Math.min(rows.length * 56 + 8, 460) }]}>
+      <FlatList
+        data={rows}
+        keyExtractor={({ c }) => c.id}
+        renderItem={renderChapter}
+        nestedScrollEnabled
+        initialNumToRender={12}
+        windowSize={5}
+      />
+    </View>
+  ) : (
+    loading ? (
+      <ActivityIndicator color={t.accent} style={{ margin: 32 }} />
+    ) : error ? (
+      <EmptyState
+        icon="cloud-offline-outline"
+        title="Couldn't load chapters"
+        message={error}
+        action="Try again"
+        onAction={reload}
+      />
+    ) : (
+      <EmptyState icon="document-outline" title="No chapters available" />
+    )
+  );
+
   return (
     <View style={[styles.flex, { backgroundColor: t.bg }]}>
       <View style={[styles.bar, { paddingTop: insets.top + 4 }]}>
@@ -119,193 +323,19 @@ export default function SeriesDetail() {
       </View>
 
       <FlatList
-        data={rows}
-        keyExtractor={({ c }) => c.id}
+        data={[] as never[]}
+        keyboardShouldPersistTaps="handled"
         contentContainerStyle={{ paddingBottom: insets.bottom + 16 }}
-        ListEmptyComponent={
-          loading ? (
-            <ActivityIndicator color={t.accent} style={{ margin: 32 }} />
-          ) : error ? (
-            <EmptyState
-              icon="cloud-offline-outline"
-              title="Couldn't load chapters"
-              message={error}
-              action="Try again"
-              onAction={reload}
-            />
-          ) : (
-            <EmptyState icon="document-outline" title="No chapters available" />
-          )
-        }
         ListHeaderComponent={
           <View>
-            <View style={styles.hero}>
-              <Cover series={series} style={styles.cover} />
-              <View style={styles.heroInfo}>
-                <Text style={[styles.title, { color: t.text }]}>{series.title}</Text>
-                <Text style={{ color: t.sub }}>
-                  {sourceName}
-                  {chapters.length ? ` · ${chapters.length} chapters` : ''}
-                  {communityMarks.length ? ` · ${communityMarks.length} community bookmark${communityMarks.length === 1 ? '' : 's'}` : ''}
-                </Text>
-                {rec ? (
-                  <View style={[styles.tier, { backgroundColor: t.card }]}>
-                    <Ionicons name="sparkles" size={12} color={t.accent} />
-                    <Text style={{ color: t.accent, fontSize: 12, fontWeight: '600' }}>{TIER_LABEL[rec.tier]}</Text>
-                  </View>
-                ) : null}
-                {progress && resumeIdx >= 0 ? (
-                  <Text numberOfLines={1} style={{ color: t.sub }}>
-                    Read to {chapters[resumeIdx].name}
-                  </Text>
-                ) : null}
-              </View>
-            </View>
-
-            {rec?.note ? (
-              <View style={[styles.note, { backgroundColor: t.card }]}>
-                <Text style={{ color: t.sub, fontSize: 12, fontWeight: '700', marginBottom: 4 }}>AUTHOR’S NOTE</Text>
-                <Text style={{ color: t.text, lineHeight: 20 }}>{rec.note}</Text>
-              </View>
-            ) : null}
-
-            <Pressable
-              disabled={!chapters.length}
-              style={[styles.cta, { backgroundColor: t.accent, opacity: chapters.length ? 1 : 0.5 }]}
-              onPress={startReading}
-            >
-              <Ionicons name="book" size={18} color="#fff" />
-              <Text style={styles.ctaText} numberOfLines={1}>
-                {progress && resumeIdx >= 0 ? `Continue · ${chapters[resumeIdx].name}` : 'Start reading'}
-              </Text>
-            </Pressable>
-
-            {chapters.length && !textOnly ? (
-              <View style={styles.actions}>
-                <Pressable
-                  disabled={!pending.length}
-                  onPress={downloadAll}
-                  style={[styles.action, { borderColor: t.border, opacity: pending.length ? 1 : 0.5 }]}
-                >
-                  <Ionicons name="download-outline" size={18} color={t.text} />
-                  <Text style={{ color: t.text }}>{pending.length ? 'Download all' : 'All downloaded'}</Text>
-                </Pressable>
-                {waiting.length ? (
-                  <Pressable
-                    onPress={() => (running ? dl.stop(series.key) : dl.start(series.key))}
-                    style={[styles.action, { borderColor: t.accent }]}
-                  >
-                    <Ionicons name={running ? 'pause' : 'play'} size={18} color={t.accent} />
-                    <Text style={{ color: t.accent }}>
-                      {running ? 'Pause' : 'Start'} ({waiting.length})
-                    </Text>
-                  </Pressable>
-                ) : null}
-                {savedCount ? (
-                  <Pressable
-                    onPress={() =>
-                      Alert.alert('Delete all downloads?', `Removes ${savedCount} saved chapters from this phone.`, [
-                        { text: 'Cancel', style: 'cancel' },
-                        { text: 'Delete', style: 'destructive', onPress: () => dl.removeSeries(series.key) },
-                      ])
-                    }
-                    style={[styles.action, { borderColor: t.border }]}
-                  >
-                    <Ionicons name="trash-outline" size={18} color={t.danger} />
-                    <Text style={{ color: t.danger }}>Delete downloads</Text>
-                  </Pressable>
-                ) : null}
-              </View>
-            ) : null}
-
-            {account.enabled ? (
-              <Pressable onPress={openRecommend} style={[styles.action, { borderColor: t.border, marginHorizontal: 16, marginTop: 10 }]}>
-                <Ionicons name="sparkles-outline" size={18} color={t.text} />
-                <Text style={{ color: t.text }}>Recommend this title</Text>
-              </Pressable>
-            ) : null}
-
-            {offline && chapters.length ? (
-              <Text style={[styles.offline, { color: t.sub }]}>Offline — showing downloaded chapters only.</Text>
-            ) : null}
-
-            <View style={styles.listHead}>
-              <Text style={[styles.listTitle, { color: t.text }]}>Chapters</Text>
-              <Pressable style={styles.sort} onPress={() => setNewestFirst((v) => !v)}>
-                <Ionicons name={newestFirst ? 'arrow-down' : 'arrow-up'} size={16} color={t.sub} />
-                <Text style={{ color: t.sub }}>{newestFirst ? 'Newest first' : 'Oldest first'}</Text>
-              </Pressable>
-            </View>
+            {header}
+            {chapterWindow}
           </View>
         }
-        renderItem={({ item: { c, i } }) => {
-          const current = resumeIdx === i;
-          const read = resumeIdx >= 0 && i < resumeIdx;
-          const marks = marksByChapter.get(c.id) ?? [];
-          const authorMarks = authorByChapter.get(c.id) ?? [];
-          const crowd = communityByChapter.get(c.id) ?? [];
-          const notes = [...authorMarks.map((b) => b?.note), ...crowd.map((b) => b.note), ...marks.map((b) => b.note)]
-            .filter(Boolean)
-            .join(' · ');
-          const saved = dl.getChapter(series.key, c.id);
-          const job = dl.getJob(series.key, c.id);
-          return (
-            <Pressable
-              style={[styles.chapter, { borderBottomColor: t.border }]}
-              onPress={() => openReader(series, c.id, current ? progress!.page : 1)}
-              onLongPress={saved ? () => confirmDeleteChapter(c.id, c.name) : undefined}
-            >
-              <View style={styles.chapterText}>
-                <Text numberOfLines={1} style={[styles.chapterName, { color: read ? t.sub : t.text }]}>
-                  {c.name}
-                </Text>
-                {notes ? (
-                  <Text numberOfLines={1} style={[styles.chapterNote, { color: t.accent }]}>
-                    {notes}
-                  </Text>
-                ) : null}
-              </View>
-              {authorMarks.length ? <Ionicons name="sparkles" size={16} color={t.accent} /> : null}
-              {crowd.length ? <Ionicons name="people" size={16} color={t.accent} /> : null}
-              {marks.length ? <Ionicons name="bookmark" size={16} color={t.accent} /> : null}
-              {current ? (
-                textOnly ? (
-                  <Ionicons name="bookmark" size={16} color={t.accent} />
-                ) : (
-                  <Text style={{ color: t.accent, fontSize: 12 }}>
-                    p.{progress!.page}/{progress!.total || '?'}
-                  </Text>
-                )
-              ) : read ? (
-                <Ionicons name="checkmark-circle" size={18} color={t.sub} />
-              ) : null}
-              {saved ? (
-                <Ionicons name="checkmark-done-circle" size={22} color={t.accent} />
-              ) : job ? (
-                <Pressable
-                  hitSlop={10}
-                  onPress={() => (job.state === 'error' ? dl.retry(series.key, c.id) : dl.cancel(series.key, c.id))}
-                  style={styles.jobBtn}
-                >
-                  {job.state === 'error' ? (
-                    <Ionicons name="refresh-circle" size={22} color={t.danger} />
-                  ) : job.state === 'active' ? (
-                    <>
-                      <ActivityIndicator size="small" color={t.accent} />
-                      <Text style={{ color: t.sub, fontSize: 11 }}>{job.total ? `${job.done}/${job.total}` : '…'}</Text>
-                    </>
-                  ) : (
-                    <Ionicons name="time-outline" size={22} color={t.sub} />
-                  )}
-                </Pressable>
-              ) : textOnly ? null : (
-                <Pressable hitSlop={10} onPress={() => addToDownloads([c])}>
-                  <Ionicons name="download-outline" size={22} color={t.sub} />
-                </Pressable>
-              )}
-            </Pressable>
-          );
-        }}
+        renderItem={() => null}
+        ListFooterComponent={
+          getSource(series.source) ? <Comments source={series.source} seriesId={series.id} /> : undefined
+        }
       />
       <RecommendSheet series={series} visible={recommendOpen} onClose={() => setRecommendOpen(false)} />
     </View>
@@ -368,4 +398,5 @@ const styles = StyleSheet.create({
   chapterName: { fontSize: 15 },
   chapterNote: { fontSize: 12, marginTop: 2 },
   jobBtn: { alignItems: 'center', minWidth: 30 },
+  window: { marginHorizontal: 8, borderWidth: 1, borderRadius: 12, overflow: 'hidden' },
 });

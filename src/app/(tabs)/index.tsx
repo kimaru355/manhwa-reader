@@ -6,6 +6,8 @@ import { CommunityFeed } from '../../components/CommunityFeed';
 import { Cover } from '../../components/Cover';
 import { EmptyState } from '../../components/EmptyState';
 import { Segmented } from '../../components/Segmented';
+import { Votes } from '../../components/Votes';
+import { authorRecId } from '../../lib/reactions';
 import { TIER_LABEL, TIER_ORDER, toSeries, useRecs } from '../../lib/recs';
 import { openSeries } from '../../lib/series';
 import { confirmAdult } from '../../lib/adult';
@@ -102,6 +104,9 @@ export default function Home() {
                       </Text>
                     </View>
                   ) : null}
+                  <View style={styles.votes}>
+                    <Votes type="author_rec" id={authorRecId(s.source, s.id)} />
+                  </View>
                 </Pressable>
               ))}
               {/* Pads a short last row so cards keep their width. */}
@@ -130,4 +135,5 @@ const styles = StyleSheet.create({
   title: { marginTop: 6, fontSize: 14, fontWeight: '500', lineHeight: 18 },
   noteRow: { flexDirection: 'row', alignItems: 'center', gap: 4, marginTop: 2 },
   note: { flex: 1, fontSize: 11 },
+  votes: { marginTop: 6 },
 });

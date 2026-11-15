@@ -7,7 +7,7 @@ import type { Bookmark, Series } from './types';
  *
  * Plain data and pure functions, so the rules can be tested.
  */
-const SERVER_SOURCES = ['mangadex', 'webtoons', 'hentai20', 'novelfull', 'novelbin', 'external'];
+const SERVER_SOURCES = ['mangadex', 'mangapill', 'mangaread', 'webtoons', 'hentai20', 'novelfull', 'novelbin', 'external'];
 const SERVER_CATEGORIES = ['manga', 'manhwa', 'interesting', 'novel'];
 
 const MAX = { key: 300, id: 200, title: 300, url: 2000, bookmarkId: 64, chapterId: 300, chapterName: 300, note: 200 };

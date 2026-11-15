@@ -22,6 +22,7 @@ import {
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { BookmarksSheet } from '../components/BookmarksSheet';
+import { Comments } from '../components/Comments';
 import { StatusPill } from '../components/StatusPill';
 import { useAccount } from '../lib/account';
 import { submitBookmark } from '../lib/community';
@@ -384,16 +385,24 @@ An admin reviews it before anyone else sees it.`, [
               </Pressable>
             )
           }
+          keyboardShouldPersistTaps="handled"
           ListFooterComponent={
-            <View style={styles.footer}>
-              {next ? (
-                <Pressable style={styles.pill} onPress={() => goTo(next)}>
-                  <Text style={styles.pillText}>Next: {next.name}</Text>
-                  <Ionicons name="arrow-forward" size={16} color="#fff" />
-                </Pressable>
-              ) : (
-                <Text style={styles.dim}>Last chapter reached</Text>
-              )}
+            <View>
+              <View style={styles.footer}>
+                {next ? (
+                  <Pressable style={styles.pill} onPress={() => goTo(next)}>
+                    <Text style={styles.pillText}>Next: {next.name}</Text>
+                    <Ionicons name="arrow-forward" size={16} color="#fff" />
+                  </Pressable>
+                ) : (
+                  <Text style={styles.dim}>Last chapter reached</Text>
+                )}
+              </View>
+              {getSource(series.source) ? (
+                <View style={{ paddingBottom: insets.bottom + 140 }}>
+                  <Comments source={series.source} seriesId={series.id} chapterId={chapter.id} title="Chapter comments" dark />
+                </View>
+              ) : null}
             </View>
           }
         />
@@ -458,6 +467,7 @@ An admin reviews it before anyone else sees it.`, [
             bookmarks={bookmarks}
             author={author}
             community={community}
+            seriesRef={{ source: series.source, id: series.id }}
             onShare={account.enabled ? shareBookmark : undefined}
             onAdd={(note) =>
               addBookmark({ seriesKey: series.key, chapterId: chapter.id, chapterName: chapter.name, page, note })

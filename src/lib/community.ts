@@ -14,8 +14,10 @@ export type CommunityRec = {
   tier: Tier;
   note: string | null;
   createdAt: string;
-  votes: number;
-  voted: boolean;
+  likes: number;
+  dislikes: number;
+  /** This reader's choice: 1 like, -1 dislike, 0 none. */
+  mine: -1 | 0 | 1;
 };
 
 export type CommunityPage = { items: CommunityRec[]; nextCursor: string | null };

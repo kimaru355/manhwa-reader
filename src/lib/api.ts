@@ -189,3 +189,15 @@ export async function deleteAccount() {
   await authed('/me', { method: 'DELETE' });
   await store(null);
 }
+
+/** Sends to a public endpoint, with the login when there is one (so the server can fill in your own choices). */
+export async function publicPost<T>(path: string, body: unknown): Promise<T> {
+  if (await loadSession()) {
+    try {
+      return await authed<T>(path, { body });
+    } catch (e) {
+      if ((e as Failure).status !== 401 && !(e instanceof FriendlyError && /session ended/i.test(e.message))) throw e;
+    }
+  }
+  return (await call(path, { body })) as T;
+}

@@ -35,6 +35,46 @@ function toSeries(m: MdManga): Series {
   };
 }
 
+/**
+ * Whether each title has at least one English chapter that can be read here. Licensed titles keep only links to
+ * the publisher's site, which MangaDex still counts as "available chapters", so the browse filter alone lets them
+ * through and they open with an empty chapter list. Answers are kept for a few hours; a failed check keeps the title.
+ */
+const readable = new Map<string, { ok: boolean; at: number }>();
+const READABLE_FRESH_MS = 6 * 60 * 60_000;
+
+async function hasReadableChapters(id: string): Promise<boolean> {
+  const hit = readable.get(id);
+  if (hit && Date.now() - hit.at < READABLE_FRESH_MS) return hit.ok;
+  try {
+    const res = await getJson<{ total: number }>(
+      `${API}/manga/${encodeURIComponent(id)}/feed?${qs([['limit', 1], ['translatedLanguage[]', 'en'], ['includeExternalUrl', 0], ...RATINGS])}`,
+      HEADERS,
+    );
+    const ok = res.total > 0;
+    if (readable.size > 5000) readable.clear();
+    readable.set(id, { ok, at: Date.now() });
+    return ok;
+  } catch {
+    return true;
+  }
+}
+
+/** Drops the titles with nothing to read, checking a few at a time so MangaDex isn't flooded. */
+async function onlyReadable(items: Series[]): Promise<Series[]> {
+  const keep = new Array<boolean>(items.length).fill(true);
+  let next = 0;
+  await Promise.all(
+    Array.from({ length: 4 }, async () => {
+      while (next < items.length) {
+        const i = next++;
+        keep[i] = await hasReadableChapters(items[i].id);
+      }
+    }),
+  );
+  return items.filter((_, i) => keep[i]);
+}
+
 export const mangadex: Source = {
   id: 'mangadex',
   name: 'MangaDex',
@@ -52,7 +92,7 @@ export const mangadex: Source = {
       q ? ['title', q] : ['order[followedCount]', 'desc'],
     ];
     const res = await getJson<{ data: MdManga[]; total: number }>(`${API}/manga?${qs(params)}`, HEADERS);
-    return { items: res.data.map(toSeries), hasMore: (page + 1) * PAGE < res.total };
+    return { items: await onlyReadable(res.data.map(toSeries)), hasMore: (page + 1) * PAGE < res.total };
   },
 
   async chapters(series) {

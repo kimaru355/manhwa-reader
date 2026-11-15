@@ -11,6 +11,9 @@ import {
   TextInput,
   View,
 } from 'react-native';
+
+import { authorBookmarkId } from '../lib/reactions';
+import { Votes } from './Votes';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import type { Bookmark, Chapter } from '../lib/types';
@@ -30,6 +33,8 @@ type Props = {
   community?: Bookmark[];
   /** Suggest one of your bookmarks to everyone (an admin reviews it first). */
   onShare?: (b: Bookmark) => void;
+  /** The title, for liking the author's and the community's bookmarks. */
+  seriesRef?: { source: string; id: string };
   onAdd: (note: string) => void;
   onOpen: (b: Bookmark) => void;
   onRemove: (id: string) => void;
@@ -37,7 +42,21 @@ type Props = {
 };
 
 /** Reader sheet: bookmark the current spot with an optional note, and jump to saved ones. */
-export function BookmarksSheet({ visible, onClose, chapters, current, bookmarks, author = [], community = [], onShare, onAdd, onOpen, onRemove, onEdit }: Props) {
+export function BookmarksSheet({
+  visible,
+  onClose,
+  chapters,
+  current,
+  bookmarks,
+  author = [],
+  community = [],
+  seriesRef,
+  onShare,
+  onAdd,
+  onOpen,
+  onRemove,
+  onEdit,
+}: Props) {
   const insets = useSafeAreaInsets();
   const [note, setNote] = useState('');
   const [editing, setEditing] = useState<Bookmark | null>(null);
@@ -137,6 +156,9 @@ export function BookmarksSheet({ visible, onClose, chapters, current, bookmarks,
                             </Text>
                           ) : null}
                         </View>
+                        {seriesRef ? (
+                          <Votes type="author_bookmark" id={authorBookmarkId(seriesRef.source, seriesRef.id, b.chapterId, b.page)} dark />
+                        ) : null}
                       </Pressable>
                     ))}
                   </View>
@@ -157,6 +179,7 @@ export function BookmarksSheet({ visible, onClose, chapters, current, bookmarks,
                             </Text>
                           ) : null}
                         </View>
+                        <Votes type="community_bookmark" id={b.id.replace(/^community-/, '')} dark />
                       </Pressable>
                     ))}
                   </View>

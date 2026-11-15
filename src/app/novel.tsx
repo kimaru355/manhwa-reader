@@ -8,6 +8,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { EmptyState } from '../components/EmptyState';
 import { friendly, toastError } from '../lib/errors';
 import { useLibrary } from '../lib/library';
+import { Comments } from '../components/Comments';
 import { parseRef, useChapters } from '../lib/series';
 import { getSource } from '../lib/sources';
 import { useTheme } from '../lib/theme';
@@ -142,6 +143,9 @@ export default function Novel() {
             </Text>
           ))}
           {nav}
+          {series && chapter ? (
+            <Comments source={series.source} seriesId={series.id} chapterId={chapter.id} title="Chapter comments" />
+          ) : null}
         </ScrollView>
       )}
     </View>

@@ -6,6 +6,7 @@ import { accountsEnabled } from './config';
 import { friendly } from './errors';
 import { useLibrary } from './library';
 import { parseCategories, type CategoryState } from './listCategories';
+import { resetReactions } from './reactions';
 import { threeWay } from './merge';
 import { sendableBookmark, sendableSeries, toServerBookmark, toServerSeries } from './syncShape';
 import type { Bookmark, Series, Tier } from './types';
@@ -107,6 +108,9 @@ function toBody(ops: Op[]) {
 export function AccountProvider({ children }: { children: ReactNode }) {
   const lib = useLibrary();
   const [user, setUser] = useState<AccountContext['user']>(null);
+  useEffect(() => {
+    resetReactions();
+  }, [user?.id]);
   const [syncing, setSyncing] = useState(false);
   const [lastSync, setLastSync] = useState<number | null>(null);
   const [syncError, setSyncError] = useState<string | null>(null);

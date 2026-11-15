@@ -1,25 +1,23 @@
 import { Ionicons } from '@expo/vector-icons';
-import { router } from 'expo-router';
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { ActivityIndicator, Alert, FlatList, Pressable, RefreshControl, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
+import { ActivityIndicator, FlatList, Pressable, RefreshControl, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 
-import { useAccount } from '../lib/account';
 import { confirmAdult } from '../lib/adult';
 import {
   communityToSeries,
   fetchCommunity,
-  unvote,
-  vote,
   type CommunityRec,
   type Sort,
 } from '../lib/community';
 import { friendly, toastError } from '../lib/errors';
+import { seedReactions } from '../lib/reactions';
 import { TIER_LABEL, TIER_ORDER } from '../lib/recs';
 import { openSeries } from '../lib/series';
 import { useTheme } from '../lib/theme';
 import type { Category, Tier } from '../lib/types';
 import { Cover } from './Cover';
 import { EmptyState } from './EmptyState';
+import { Votes } from './Votes';
 
 const SORTS: { value: Sort; label: string }[] = [
   { value: 'latest', label: 'Latest' },
@@ -39,7 +37,6 @@ const CATEGORIES: { value: CategoryFilter; label: string }[] = [
 
 export function CommunityFeed() {
   const t = useTheme();
-  const { user } = useAccount();
   const [sort, setSort] = useState<Sort>('latest');
   const [category, setCategory] = useState<CategoryFilter>('all');
   const [tier, setTier] = useState<Tier | 'all'>('all');
@@ -50,8 +47,6 @@ export function CommunityFeed() {
   const [error, setError] = useState<string | null>(null);
   const run = useRef(0);
   const busy = useRef(false);
-  /** Recommendations whose vote is being saved; a second tap waits for the first to finish. */
-  const voting = useRef(new Set<string>());
 
   const load = useCallback(
     async (reset: boolean, from: string | null) => {
@@ -74,6 +69,7 @@ export function CommunityFeed() {
           cursor: reset ? null : from,
         });
         if (mine !== run.current) return;
+        seedReactions(res.items.map((r) => ({ type: 'community_rec' as const, id: r.id, likes: r.likes, dislikes: r.dislikes, mine: r.mine })));
         setItems((prev) => {
           const seen = new Set(reset ? [] : prev.map((r) => r.id));
           return [...(reset ? [] : prev), ...res.items.filter((r) => !seen.has(r.id))];
@@ -100,29 +96,6 @@ export function CommunityFeed() {
     return () => clearTimeout(timer);
   }, [load, query]);
 
-  const toggleVote = async (rec: CommunityRec) => {
-    if (!user) {
-      Alert.alert('Sign in to vote', 'An account is only needed to vote, not to read.', [
-        { text: 'Not now', style: 'cancel' },
-        { text: 'Sign in', onPress: () => router.push('/account') },
-      ]);
-      return;
-    }
-    if (voting.current.has(rec.id)) return;
-    voting.current.add(rec.id);
-    const apply = (r: CommunityRec, voted: boolean, votes: number) => (r.id === rec.id ? { ...r, voted, votes } : r);
-    // Shown at once; put back if the server says no.
-    setItems((prev) => prev.map((r) => apply(r, !rec.voted, Math.max(rec.votes + (rec.voted ? -1 : 1), 0))));
-    try {
-      const res = await (rec.voted ? unvote(rec.id) : vote(rec.id));
-      setItems((prev) => prev.map((r) => apply(r, res.voted, res.votes)));
-    } catch (e) {
-      setItems((prev) => prev.map((r) => apply(r, rec.voted, rec.votes)));
-      Alert.alert("Couldn't save your vote", friendly(e));
-    } finally {
-      voting.current.delete(rec.id);
-    }
-  };
 
   const chip = (label: string, on: boolean, onPress: () => void) => (
     <Pressable key={label} onPress={onPress} style={[styles.chip, { backgroundColor: on ? t.accent : t.card }]}>
@@ -202,10 +175,7 @@ export function CommunityFeed() {
                   </Text>
                 ) : null}
               </View>
-              <Pressable hitSlop={8} onPress={() => toggleVote(item)} style={[styles.vote, item.voted && { backgroundColor: t.accent }]}>
-                <Ionicons name={item.voted ? 'arrow-up-circle' : 'arrow-up-circle-outline'} size={22} color={item.voted ? '#fff' : t.sub} />
-                <Text style={{ color: item.voted ? '#fff' : t.text, fontWeight: '700', fontSize: 13 }}>{item.votes}</Text>
-              </Pressable>
+              <Votes type="community_rec" id={item.id} load={false} />
             </Pressable>
           )}
         />
