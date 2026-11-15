@@ -1,7 +1,20 @@
 import { Ionicons } from '@expo/vector-icons';
 import { router, useLocalSearchParams } from 'expo-router';
-import { useMemo, useState } from 'react';
-import { ActivityIndicator, Alert, FlatList, Platform, Pressable, StyleSheet, Text, ToastAndroid, View } from 'react-native';
+import { Fragment, useMemo, useState } from 'react';
+import {
+  ActivityIndicator,
+  Alert,
+  FlatList,
+  Platform,
+  Pressable,
+  ScrollView,
+  StyleSheet,
+  Text,
+  ToastAndroid,
+  View,
+  type NativeScrollEvent,
+  type NativeSyntheticEvent,
+} from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { Cover } from '../components/Cover';
@@ -19,6 +32,9 @@ import { getSource } from '../lib/sources';
 import { useTheme } from '../lib/theme';
 import type { Bookmark } from '../lib/types';
 
+/** Chapters drawn in the chapter window at first, and added each time its end comes near. */
+const WINDOW_STEP = 60;
+
 export default function SeriesDetail() {
   const t = useTheme();
   const insets = useSafeAreaInsets();
@@ -30,6 +46,8 @@ export default function SeriesDetail() {
   const { chapters, loading, error, reload, offline } = useChapters(series);
   const [newestFirst, setNewestFirst] = useState(false);
   const [recommendOpen, setRecommendOpen] = useState(false);
+  /** How many chapters the window draws, for the title and order it was counted for (anything else starts over). */
+  const [drawn, setDrawn] = useState({ key: '', count: WINDOW_STEP });
   const account = useAccount();
   const communityMarks = useCommunityBookmarks(series);
 
@@ -278,16 +296,24 @@ export default function SeriesDetail() {
 
   // The chapters sit in their own scrolling window so a title with hundreds of chapters doesn't push the
   // comments far down. It is as tall as the chapters need, up to about eight rows.
+  // A list inside the screen's list would not scroll on its own (React Native draws a nested list of the same
+  // direction as a plain view), so the window is a ScrollView that draws the chapters a batch at a time.
+  const windowKey = `${series.key}|${newestFirst}`;
+  const count = drawn.key === windowKey ? drawn.count : WINDOW_STEP;
+  const onWindowScroll = (e: NativeSyntheticEvent<NativeScrollEvent>) => {
+    const { contentOffset, contentSize, layoutMeasurement } = e.nativeEvent;
+    if (count < rows.length && contentOffset.y + layoutMeasurement.height > contentSize.height - 400) {
+      setDrawn({ key: windowKey, count: count + WINDOW_STEP });
+    }
+  };
   const chapterWindow = rows.length ? (
     <View style={[styles.window, { borderColor: t.border, height: Math.min(rows.length * 56 + 8, 460) }]}>
-      <FlatList
-        data={rows}
-        keyExtractor={({ c }) => c.id}
-        renderItem={renderChapter}
-        nestedScrollEnabled
-        initialNumToRender={12}
-        windowSize={5}
-      />
+      <ScrollView nestedScrollEnabled onScroll={onWindowScroll} scrollEventThrottle={64} keyboardShouldPersistTaps="handled">
+        {rows.slice(0, count).map((row) => (
+          <Fragment key={row.c.id}>{renderChapter({ item: row })}</Fragment>
+        ))}
+        {count < rows.length ? <ActivityIndicator color={t.accent} style={{ marginVertical: 12 }} /> : null}
+      </ScrollView>
     </View>
   ) : (
     loading ? (
