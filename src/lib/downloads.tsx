@@ -2,13 +2,78 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as FS from 'expo-file-system/legacy';
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 
-import { startBackground, stopBackground, updateBackground } from './background';
+import { AppState } from 'react-native';
+
+import { backgroundTimeUp, startBackground, stopBackground, updateBackground } from './background';
 import { friendly } from './errors';
 import { chapterDir, downloadFile, fetchPages, removeDir, seriesDir } from './files';
 import { getSource, imageHeaders } from './sources';
 import type { Chapter, DownloadedChapter, DownloadedSeries, Series } from './types';
 
-const KEYS = { items: 'downloads1', queue: 'downloadQueue1', started: 'downloadStarted1' } as const;
+const KEYS = { legacyItems: 'downloads1', index: 'downloads2', queue: 'downloadQueue1', started: 'downloadStarted1' } as const;
+
+/**
+ * Downloaded titles are stored one row per title (plus a row listing their keys in order). Android can't read
+ * back a single stored value larger than about 2 MB, which one row holding every downloaded chapter of every
+ * title would reach for a large collection, and the whole list would then come back empty.
+ */
+const rowKey = (seriesKey: string) => `${KEYS.index}:${seriesKey}`;
+
+const isDownloaded = (v: unknown): v is DownloadedSeries => {
+  const d = v as DownloadedSeries | null;
+  return !!d && typeof d === 'object' && typeof d.series?.key === 'string' && Array.isArray(d.chapters);
+};
+
+async function readJson<T>(key: string, fallback: T): Promise<T> {
+  try {
+    const raw = await AsyncStorage.getItem(key);
+    return raw ? (JSON.parse(raw) as T) : fallback;
+  } catch {
+    return fallback;
+  }
+}
+
+async function loadItems(): Promise<DownloadedSeries[]> {
+  const index = await readJson<unknown>(KEYS.index, null);
+  if (Array.isArray(index)) {
+    const keys = index.filter((k): k is string => typeof k === 'string');
+    const rows = await AsyncStorage.multiGet(keys.map(rowKey)).catch(() => []);
+    const out: DownloadedSeries[] = [];
+    for (const [, raw] of rows) {
+      try {
+        const v: unknown = raw ? JSON.parse(raw) : null;
+        if (isDownloaded(v)) out.push(v);
+      } catch {
+        // One unreadable title doesn't hide the others.
+      }
+    }
+    return out;
+  }
+  // Builds before 1.4.0 kept everything in one row: move it over once. The old row is removed only after
+  // the new ones are written, so a failure here loses nothing and is tried again on the next start.
+  const legacy = (await readJson<unknown[]>(KEYS.legacyItems, [])).filter(isDownloaded);
+  try {
+    await AsyncStorage.multiSet([
+      ...legacy.map((i): [string, string] => [rowKey(i.series.key), JSON.stringify(i)]),
+      [KEYS.index, JSON.stringify(legacy.map((i) => i.series.key))],
+    ]);
+    await AsyncStorage.removeItem(KEYS.legacyItems);
+  } catch {}
+  return legacy;
+}
+
+/** Saves what changed between two versions of the list: the rows of new or changed titles, and the order. */
+async function saveItems(prev: DownloadedSeries[], next: DownloadedSeries[]) {
+  const before = new Map(prev.map((i) => [i.series.key, i]));
+  const after = new Set(next.map((i) => i.series.key));
+  const changed = next.filter((i) => before.get(i.series.key) !== i);
+  const gone = prev.filter((i) => !after.has(i.series.key)).map((i) => rowKey(i.series.key));
+  const sameOrder = prev.length === next.length && prev.every((i, n) => i.series.key === next[n].series.key);
+  const sets = changed.map((i): [string, string] => [rowKey(i.series.key), JSON.stringify(i)]);
+  if (!sameOrder) sets.push([KEYS.index, JSON.stringify(next.map((i) => i.series.key))]);
+  if (sets.length) await AsyncStorage.multiSet(sets);
+  if (gone.length) await AsyncStorage.multiRemove(gone);
+}
 
 export type Job = {
   series: Series;
@@ -66,10 +131,14 @@ export function DownloadsProvider({ children }: { children: ReactNode }) {
   const running = useRef(false);
   const removed = useRef(new Set<string>());
 
+  /** Saves run one after another, so a later change is never overwritten by an earlier one finishing late. */
+  const saving = useRef<Promise<void>>(Promise.resolve());
+
   const commitItems = useCallback((next: DownloadedSeries[]) => {
+    const prev = itemsRef.current;
     itemsRef.current = next;
     setItems(next);
-    AsyncStorage.setItem(KEYS.items, JSON.stringify(next)).catch(() => {});
+    saving.current = saving.current.then(() => saveItems(prev, next)).catch(() => {});
   }, []);
 
   /** Applies a change to the queue; `persist` is skipped for page-by-page progress. */
@@ -156,16 +225,26 @@ export function DownloadsProvider({ children }: { children: ReactNode }) {
   const pump = useCallback(async () => {
     if (running.current) return;
     running.current = true;
+    const nextJob = () =>
+      queueRef.current.find((j) => j.state === 'queued' && startedRef.current.includes(j.series.key));
+    // Once Android's daily allowance for background downloading is used up, downloads carry on only while the
+    // app is on screen (without the background service); otherwise they wait until it is opened again.
+    const mayRun = () => !backgroundTimeUp() || AppState.currentState === 'active';
     try {
-      for (;;) {
-        const job = queueRef.current.find((j) => j.state === 'queued' && startedRef.current.includes(j.series.key));
-        if (!job) break;
-        startBackground('Starting…');
-        await run(job);
+      // Stays "running" while the service stops, then looks again: a title started meanwhile is picked up here.
+      while (nextJob() && mayRun()) {
+        try {
+          for (let job = nextJob(); job && mayRun(); job = nextJob()) {
+            if (backgroundTimeUp()) await stopBackground();
+            else startBackground('Starting…');
+            await run(job);
+          }
+        } finally {
+          await stopBackground();
+        }
       }
     } finally {
       running.current = false;
-      stopBackground();
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
@@ -173,19 +252,13 @@ export function DownloadsProvider({ children }: { children: ReactNode }) {
   // Restore everything, then pick up where an interrupted download stopped.
   useEffect(() => {
     (async () => {
-      const read = async <T,>(key: string, fallback: T): Promise<T> => {
-        try {
-          const raw = await AsyncStorage.getItem(key);
-          return raw ? (JSON.parse(raw) as T) : fallback;
-        } catch {
-          return fallback;
-        }
-      };
-      const [saved, q, s] = await Promise.all([
-        read<DownloadedSeries[]>(KEYS.items, []),
-        read<Job[]>(KEYS.queue, []),
-        read<string[]>(KEYS.started, []),
+      const [saved, rawQueue, rawStarted] = await Promise.all([
+        loadItems(),
+        readJson<unknown>(KEYS.queue, []),
+        readJson<unknown>(KEYS.started, []),
       ]);
+      const q = (Array.isArray(rawQueue) ? (rawQueue as Job[]) : []).filter((j) => j?.series?.key && j?.chapter?.id);
+      const s = Array.isArray(rawStarted) ? rawStarted.filter((k): k is string => typeof k === 'string') : [];
       itemsRef.current = saved;
       setItems(saved);
       // Chapters that finished while the queue was being saved are not downloaded twice.
@@ -199,6 +272,14 @@ export function DownloadsProvider({ children }: { children: ReactNode }) {
       setStarted(live);
       pump();
     })();
+  }, [pump]);
+
+  // Opening the app renews the background allowance: carry on with anything that was waiting for it.
+  useEffect(() => {
+    const sub = AppState.addEventListener('change', (state) => {
+      if (state === 'active') pump();
+    });
+    return () => sub.remove();
   }, [pump]);
 
   const enqueue = useCallback(

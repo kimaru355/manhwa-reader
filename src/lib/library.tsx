@@ -12,7 +12,11 @@ import {
 } from 'react';
 import { AppState } from 'react-native';
 
-import { exportSnapshot, readBackup, resolveBackupDir, writeBackup } from './backup';
+import { exportSnapshot, readBackup, resolveBackupDir, shareSnapshot, writeBackup } from './backup';
+import * as cat from './listCategories';
+import { mergeSnapshot } from './snapshotMerge';
+import { cleanBookmark, cleanList, cleanRecent, cleanSeries } from './snapshotShape';
+import type { CategoryState, Shelf } from './listCategories';
 import type { Bookmark, Folder, Recent, Series, Snapshot } from './types';
 
 const KEYS = {
@@ -20,6 +24,8 @@ const KEYS = {
   recents: 'recents4',
   wishlist: 'wishlist4',
   bookmarks: 'bookmarks4',
+  categories: 'listCategories1',
+  categoriesAt: 'listCategoriesAt1',
   backupDir: 'backupDir',
 } as const;
 const MAX_RECENTS = 100;
@@ -68,10 +74,26 @@ type LibraryContext = {
   enableBackup: (dir: Folder, restore: Snapshot | null) => Promise<void>;
   stopBackup: () => void;
   exportBackup: () => Promise<string | null>;
+  /** Opens the share sheet with a file of the data. False when sharing is not available. */
+  shareBackup: () => Promise<boolean>;
   /** Replaces the app's data with a snapshot (from a backup file). */
   restoreSnapshot: (s: Snapshot) => void;
   /** Applies changes that came from the account's server on top of whatever is on the device now. */
   applySync: (patch: SyncPatch) => void;
+  /** The reader's own categories for favorites and the wishlist (kept on this device and in backups). */
+  categories: CategoryState;
+  /** Adds a category; returns its id, or null when the name can't be used (see listCategories.nameProblem). */
+  addCategory: (shelf: Shelf, name: string) => string | null;
+  renameCategory: (shelf: Shelf, id: string, name: string) => void;
+  deleteCategory: (shelf: Shelf, id: string) => void;
+  moveCategory: (shelf: Shelf, id: string, direction: -1 | 1) => void;
+  setInCategory: (shelf: Shelf, key: string, id: string, on: boolean) => void;
+  /** When the categories last changed here (ms, 0 = never). */
+  categoriesUpdatedAt: () => number;
+  /** Takes the server's categories (they were newer). */
+  applyRemoteCategories: (state: CategoryState, at: number) => void;
+  /** Adds an imported file to the data here instead of replacing it. */
+  mergeSnapshotIn: (s: Snapshot) => void;
 };
 
 export type SyncPatch = {
@@ -97,15 +119,37 @@ export function LibraryProvider({ children }: { children: ReactNode }) {
   const [backupDir, setBackupDir] = useState<Folder | null>(null);
   const [lastBackup, setLastBackup] = useState<number | null>(null);
   const [backupError, setBackupError] = useState<string | null>(null);
+  const [categories, setCategories] = useState<CategoryState>(cat.emptyCategories);
 
   const saveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const backupDirRef = useRef<Folder | null>(null);
   const writeChain = useRef<Promise<void>>(Promise.resolve());
-  const latest = useRef({ favorites, wishlist, recents, bookmarks });
+  const latest = useRef({ favorites, wishlist, recents, bookmarks, categories });
   useEffect(() => {
-    latest.current = { favorites, wishlist, recents, bookmarks };
+    latest.current = { favorites, wishlist, recents, bookmarks, categories };
   });
 
+  /** When the categories last changed (ms). Sync compares it with the server's copy; the newer one wins. */
+  const categoriesAt = useRef(0);
+
+  /** Changes the categories and saves them. `at` is set when the change came from the server. */
+  const changeCategories = useCallback((fn: (s: CategoryState) => CategoryState, at?: number) => {
+    setCategories((prev) => {
+      const next = fn(prev);
+      if (next !== prev) {
+        save(KEYS.categories, next);
+        categoriesAt.current = at ?? Date.now();
+        save(KEYS.categoriesAt, categoriesAt.current);
+      }
+      return next;
+    });
+  }, []);
+
+  const categoriesUpdatedAt = useCallback(() => categoriesAt.current, []);
+  const applyRemoteCategories = useCallback(
+    (state: CategoryState, at: number) => changeCategories(() => state, at),
+    [changeCategories],
+  );
   const buildSnapshot = (): Snapshot => ({
     app: 'manhwa-reader',
     version: 2,
@@ -132,38 +176,45 @@ export function LibraryProvider({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     (async () => {
-      const [fav, rec, wish, marks, bdir] = await Promise.all([
-        load<Series[]>(KEYS.favorites, []),
-        load<Recent[]>(KEYS.recents, []),
-        load<Series[]>(KEYS.wishlist, []),
-        load<Bookmark[]>(KEYS.bookmarks, []),
+      const [fav, rec, wish, marks, bdir, cats, catsAt] = await Promise.all([
+        load<unknown>(KEYS.favorites, []),
+        load<unknown>(KEYS.recents, []),
+        load<unknown>(KEYS.wishlist, []),
+        load<unknown>(KEYS.bookmarks, []),
         load<Folder | null>(KEYS.backupDir, null),
+        load<unknown>(KEYS.categories, null),
+        load<number>(KEYS.categoriesAt, 0),
       ]);
+      setCategories(cat.parseCategories(cats));
+      categoriesAt.current = Number(catsAt) || 0;
       setBackupDir(bdir);
       backupDirRef.current = bdir;
-      setFavorites(fav);
-      setRecents(rec);
-      setWishlist(wish);
-      setBookmarks(marks);
+      // Anything stored that isn't a usable entry is left out, so one bad row can't break the lists.
+      setFavorites(cleanList(fav, cleanSeries, (s) => s.key));
+      setRecents(cleanList(rec, cleanRecent, (r) => r.series.key));
+      setWishlist(cleanList(wish, cleanSeries, (s) => s.key));
+      setBookmarks(cleanList(marks, cleanBookmark, (b) => b.id));
       setReady(true);
     })();
   }, []);
 
   const toggleFavorite = useCallback((s: Series) => {
+    if (latest.current.favorites.some((x) => x.key === s.key)) changeCategories((c) => cat.forgetTitle(c, 'favorites', s.key));
     setFavorites((prev) => {
       const next = toggled(prev, s);
       save(KEYS.favorites, next);
       return next;
     });
-  }, []);
+  }, [changeCategories]);
 
   const toggleWishlist = useCallback((s: Series) => {
+    if (latest.current.wishlist.some((x) => x.key === s.key)) changeCategories((c) => cat.forgetTitle(c, 'wishlist', s.key));
     setWishlist((prev) => {
       const next = toggled(prev, s);
       save(KEYS.wishlist, next);
       return next;
     });
-  }, []);
+  }, [changeCategories]);
 
   const addBookmark = useCallback((b: Omit<Bookmark, 'id' | 'ts'>) => {
     const ts = Date.now();
@@ -220,6 +271,8 @@ export function LibraryProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const restoreSnapshot = useCallback((s: Snapshot) => {
+    // Backups made before categories existed leave the current ones as they are.
+    if (s.categories) changeCategories(() => s.categories!);
     setFavorites(s.favorites);
     setWishlist(s.wishlist);
     setRecents(s.recents);
@@ -228,9 +281,23 @@ export function LibraryProvider({ children }: { children: ReactNode }) {
     save(KEYS.wishlist, s.wishlist);
     save(KEYS.recents, s.recents);
     save(KEYS.bookmarks, s.bookmarks);
-  }, []);
+  }, [changeCategories]);
+
+  /** Adds an imported file to what is here (see snapshotMerge) instead of replacing it. */
+  const mergeSnapshotIn = useCallback(
+    (s: Snapshot) => restoreSnapshot(mergeSnapshot({ app: 'manhwa-reader', version: 2, savedAt: Date.now(), ...latest.current }, s)),
+    [restoreSnapshot],
+  );
 
   const applySync = useCallback((patch: SyncPatch) => {
+    if (patch.favorites.remove.length || patch.wishlist.remove.length) {
+      changeCategories((c) => {
+        let next = c;
+        for (const k of patch.favorites.remove) next = cat.forgetTitle(next, 'favorites', k);
+        for (const k of patch.wishlist.remove) next = cat.forgetTitle(next, 'wishlist', k);
+        return next;
+      });
+    }
     const apply = <T,>(list: T[], key: (x: T) => string, p: { put: T[]; remove: string[] }) => {
       if (!p.put.length && !p.remove.length) return list;
       const gone = new Set(p.remove);
@@ -254,7 +321,34 @@ export function LibraryProvider({ children }: { children: ReactNode }) {
       if (next !== prev) save(KEYS.bookmarks, next);
       return next;
     });
-  }, []);
+  }, [changeCategories]);
+
+  const addCategory = useCallback(
+    (shelf: Shelf, name: string) => {
+      if (cat.nameProblem(latest.current.categories, shelf, name)) return null;
+      const id = cat.newCategoryId();
+      changeCategories((c) => cat.addCategory(c, shelf, name, id));
+      return id;
+    },
+    [changeCategories],
+  );
+  const renameCategory = useCallback(
+    (shelf: Shelf, id: string, name: string) => changeCategories((c) => cat.renameCategory(c, shelf, id, name)),
+    [changeCategories],
+  );
+  const deleteCategory = useCallback(
+    (shelf: Shelf, id: string) => changeCategories((c) => cat.deleteCategory(c, shelf, id)),
+    [changeCategories],
+  );
+  const moveCategory = useCallback(
+    (shelf: Shelf, id: string, direction: -1 | 1) => changeCategories((c) => cat.moveCategory(c, shelf, id, direction)),
+    [changeCategories],
+  );
+  const setInCategory = useCallback(
+    (shelf: Shelf, key: string, id: string, on: boolean) =>
+      changeCategories((c) => cat.setInCategory(c, shelf, key, id, on)),
+    [changeCategories],
+  );
 
   const pickBackupFolder = useCallback(async () => {
     const res = await SAF.requestDirectoryPermissionsAsync();
@@ -285,13 +379,14 @@ export function LibraryProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const exportBackup = useCallback(() => exportSnapshot(buildSnapshot()), []);
+  const shareBackup = useCallback(() => shareSnapshot(buildSnapshot()), []);
 
   // Auto-save shortly after anything changes, and right away when the app leaves the foreground.
   useEffect(() => {
     if (!ready || !backupDir) return;
     const t = setTimeout(() => flushBackup(), 2500);
     return () => clearTimeout(t);
-  }, [ready, backupDir, favorites, wishlist, recents, bookmarks, flushBackup]);
+  }, [ready, backupDir, favorites, wishlist, recents, bookmarks, categories, flushBackup]);
 
   useEffect(() => {
     const sub = AppState.addEventListener('change', (state) => {
@@ -328,10 +423,29 @@ export function LibraryProvider({ children }: { children: ReactNode }) {
       enableBackup,
       stopBackup,
       exportBackup,
+      shareBackup,
       restoreSnapshot,
       applySync,
+      categories,
+      addCategory,
+      renameCategory,
+      deleteCategory,
+      moveCategory,
+      setInCategory,
+      categoriesUpdatedAt,
+      applyRemoteCategories,
+      mergeSnapshotIn,
     };
   }, [
+    categories,
+    addCategory,
+    renameCategory,
+    deleteCategory,
+    moveCategory,
+    setInCategory,
+    categoriesUpdatedAt,
+    applyRemoteCategories,
+    mergeSnapshotIn,
     backupDir,
     lastBackup,
     backupError,
@@ -339,6 +453,7 @@ export function LibraryProvider({ children }: { children: ReactNode }) {
     enableBackup,
     stopBackup,
     exportBackup,
+    shareBackup,
     restoreSnapshot,
     applySync,
     ready,

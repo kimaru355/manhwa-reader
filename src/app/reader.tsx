@@ -27,7 +27,7 @@ import { useAccount } from '../lib/account';
 import { submitBookmark } from '../lib/community';
 import { useDownloads } from '../lib/downloads';
 import { friendly, FriendlyError, toastError } from '../lib/errors';
-import { chapterDir, downloadFile, markDone, pageName, pruneTemp, readDone } from '../lib/files';
+import { chapterDir, downloadFile, fileExists, markDone, pageName, pruneTemp, readDone, removeDir } from '../lib/files';
 import { useLibrary } from '../lib/library';
 import { PageLoader } from '../lib/pageLoader';
 import { useRecs } from '../lib/recs';
@@ -64,7 +64,7 @@ export default function Reader() {
   const { saveProgress, getBookmarks, addBookmark, removeBookmark, updateBookmark } = useLibrary();
   const { find } = useRecs();
   const dl = useDownloads();
-  const { chapters } = useChapters(series);
+  const { chapters, error: listError, offline: listPending } = useChapters(series);
   const communityMarks = useCommunityBookmarks(series);
   const account = useAccount();
 
@@ -108,8 +108,13 @@ export default function Reader() {
       let dir: string;
       let names: string[];
       let urls: string[] | null = null;
-      if (saved) {
-        dir = chapterDir(series.key, chapter.id, true);
+      // A downloaded chapter whose files went missing (storage cleaned, partial restore) is read online instead.
+      const savedDir = saved ? chapterDir(series.key, chapter.id, true) : '';
+      const savedIntact =
+        !!saved &&
+        (await Promise.all(saved.files.map((f) => fileExists(`${savedDir}${f}`)))).every(Boolean);
+      if (saved && (savedIntact || !source)) {
+        dir = savedDir;
         names = saved.files;
       } else {
         dir = chapterDir(series.key, chapter.id, false);
@@ -122,15 +127,21 @@ export default function Reader() {
         }
       }
 
+      // A source can list a chapter that has nothing in it (not released yet, or removed).
+      if (!names.length) throw new FriendlyError('No pages were found for this chapter.');
+      // A bookmark or saved spot past the end (the chapter got shorter) opens on the last page.
+      const opening = Math.min(Math.max(startPage, 1), names.length);
+
       const state: Pg[] = names.map(() => ({ uri: null, ratio: null, failed: false }));
       let shown = false;
       const publish = () => alive && shown && setPages(state.slice());
+      /** Height/width of an image, or null if the file can't be read as one. */
       const sizeOf = (uri: string) =>
-        new Promise<number>((resolve) =>
+        new Promise<number | null>((resolve) =>
           RNImage.getSize(
             uri,
             (w, h) => resolve(w > 0 ? h / w : 1.4),
-            () => resolve(1.4),
+            () => resolve(null),
           ),
         );
 
@@ -143,7 +154,15 @@ export default function Reader() {
         }
         try {
           if (urls) await downloadFile(urls[i], uri, headers);
-          state[i] = { uri, ratio: await sizeOf(uri), failed: false };
+          let ratio = await sizeOf(uri);
+          if (ratio === null && urls) {
+            // Not a readable image (for example cut off by an older version of the app): fetch it again.
+            await removeDir(uri);
+            await downloadFile(urls[i], uri, headers);
+            ratio = await sizeOf(uri);
+          }
+          if (ratio === null) throw new FriendlyError("This page couldn't be read.");
+          state[i] = { uri, ratio, failed: false };
         } catch (e) {
           state[i] = { uri: null, ratio: null, failed: true };
           publish();
@@ -161,16 +180,18 @@ export default function Reader() {
         await mapLimit(names, 8, (_, i) => fetchOne(i));
         if (!alive) return;
         shown = true;
+        setPage(opening);
         setPages(state.slice());
       } else {
         // Only the first pages are needed to start reading; the rest load as the reader moves on.
-        const start = Math.min(Math.max(startPage - 1, 0), names.length - 1);
+        const start = opening - 1;
         const loader = new PageLoader(names.length, start, fetchOne);
         loaderRef.current = loader;
         await loader.loadInitial((done, tot) => alive && setProgress({ done, total: tot }));
         if (!alive) return;
         if (!state[start].uri) throw new FriendlyError("Couldn't load this chapter. Check your connection and try again.");
         shown = true;
+        setPage(opening);
         setPages(state.slice());
         pruneTemp();
       }
@@ -225,7 +246,10 @@ export default function Reader() {
   if (!series || !chapter) {
     return (
       <View style={[styles.fill, styles.center]}>
-        <Text style={styles.dim}>{series && chapters.length === 0 ? 'Loading…' : 'Chapter not found.'}</Text>
+        {/* Still waiting for the chapter list, unless it failed (offline) or has arrived without this chapter. */}
+        <Text style={styles.dim}>
+          {!series ? 'Chapter not found.' : listError ? listError : listPending ? 'Loading…' : 'Chapter not found.'}
+        </Text>
         <Pressable onPress={() => router.back()} style={styles.pill}>
           <Text style={styles.pillText}>Go back</Text>
         </Pressable>
@@ -317,7 +341,7 @@ An admin reviews it before anyone else sees it.`, [
           ref={listRef}
           data={pages}
           keyExtractor={(_, i) => String(i)}
-          initialScrollIndex={Math.min(startPage - 1, pages.length - 1)}
+          initialScrollIndex={Math.min(Math.max(startPage - 1, 0), pages.length - 1)}
           maintainVisibleContentPosition={{ minIndexForVisible: 0 }}
           getItemLayout={(_, i) => ({ length: heights[i], offset: offsets[i], index: i })}
           onScroll={onScroll}

@@ -13,6 +13,25 @@ new key. Without `keystore.properties` a build falls back to the debug key.
 
 1. Bump `version` in `app.json` (the versionCode is derived: 1.4.0 -> 10400).
 2. Regenerate the Android project so it picks up the version: `npx expo prebuild --platform android --clean`
-3. Build the release APK in Android Studio.
-4. Copy `android/app/build/outputs/apk/release/app-release.apk` to the site's `public/manhwa-reader.apk` and set
-   `public/version.json` to the same versionCode/versionName.
+3. Build the release in Android Studio (or `cd android && ./gradlew assembleRelease`). Since 1.4.0 one build makes
+   two APKs (`plugins/withAbiSplits.js`), in `android/app/build/outputs/apk/release/`:
+   - `app-arm64-v8a-release.apk`: most phones (64-bit)
+   - `app-armeabi-v7a-release.apk`: older phones that only run 32-bit apps
+4. Put them on the website: `npm run publish:apks -- "Short notes about this version"`. This copies them into
+   `site/public/` as
+   - `manhwa-reader-v<version>.apk`
+   - `manhwa-reader-32-bit-v-<version>.apk`
+
+   writes `site/public/version.json` (versionCode, versionName, notes), and removes older published APKs.
+5. Commit and deploy the site. The app's update check reads `version.json`, and "Get it" opens the site's
+   `/download` page, which offers both APKs.
+
+Both APKs have the same versionCode and signing key, so either one installs over any earlier version. Apps older
+than 1.4.0 update from `/manhwa-reader.apk`; once that file is gone the address leads to `/download`.
+
+## Building with EAS instead
+
+EAS signs with a key it stores for the project, not with `keystore/release.keystore`. An APK built by EAS will not
+install over one built in Android Studio (or the other way round) unless both use the same key. To make EAS use
+your key, upload it once with `npx eas-cli@latest credentials` (Android -> production -> Keystore -> upload), or keep
+building every release locally as described above. Pick one and stick to it.

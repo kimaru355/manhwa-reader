@@ -8,6 +8,7 @@ import { EmptyState } from '../../components/EmptyState';
 import { Segmented } from '../../components/Segmented';
 import { TIER_LABEL, TIER_ORDER, toSeries, useRecs } from '../../lib/recs';
 import { openSeries } from '../../lib/series';
+import { confirmAdult } from '../../lib/adult';
 import { useTheme } from '../../lib/theme';
 import type { Category, Series, Tier } from '../../lib/types';
 
@@ -49,7 +50,10 @@ export default function Home() {
       <Segmented
         variant="tabs"
         value={top}
-        onChange={setTop}
+        onChange={async (v) => {
+          if (v === 'interesting' && !(await confirmAdult())) return;
+          setTop(v);
+        }}
         options={[
           { value: 'home', label: 'Home' },
           { value: 'interesting', label: 'Interesting' },

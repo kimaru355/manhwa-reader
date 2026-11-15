@@ -10,10 +10,17 @@ type EpisodesResponse = {
 };
 
 let originals: Promise<Series[]> | null = null;
+let originalsAt = 0;
+/** How long the list is reused before it is fetched again. */
+const ORIGINALS_FRESH_MS = 15 * 60_000;
+/** The last list that loaded, shown again if a refresh fails. */
+let lastGood: Series[] | null = null;
 
 /** The originals page lists every current title in one go; it also serves as the search pool. */
 function loadOriginals(): Promise<Series[]> {
-  originals ??= getText(`${SITE}/en/originals`)
+  if (originals && Date.now() - originalsAt < ORIGINALS_FRESH_MS) return originals;
+  originalsAt = Date.now();
+  originals = getText(`${SITE}/en/originals`)
     .then((html) => {
       const out: Series[] = [];
       const seen = new Set<string>();
@@ -31,10 +38,12 @@ function loadOriginals(): Promise<Series[]> {
           category: 'manhwa',
         });
       }
+      if (out.length) lastGood = out;
       return out;
     })
     .catch((e) => {
       originals = null;
+      if (lastGood) return lastGood;
       throw e;
     });
   return originals;
@@ -57,7 +66,7 @@ export const webtoons: Source = {
     let cursor: number | undefined;
     for (let i = 0; i < 50; i++) {
       const res = await getJson<EpisodesResponse>(
-        `${SITE}/api/v1/webtoon/${series.id}/episodes?pageSize=100&language=en${cursor ? `&cursor=${cursor}` : ''}`,
+        `${SITE}/api/v1/webtoon/${encodeURIComponent(series.id)}/episodes?pageSize=100&language=en${cursor ? `&cursor=${cursor}` : ''}`,
       );
       for (const e of res.result.episodeList) {
         out.push({ id: String(e.episodeNo), name: decodeHtml(e.episodeTitle), url: `${SITE}${e.viewerLink}` });

@@ -19,15 +19,25 @@ async function exists(path: string) {
   return info.exists && (info as { size?: number }).size !== 0;
 }
 
+/** Whether a non-empty file is at `path`. Never throws. */
+export const fileExists = (path: string) => exists(path).catch(() => false);
+
 const FILE_TIMEOUT_MS = 45_000;
 
+/**
+ * Downloads `url` to `dest`. The bytes go to `dest.part` first and are moved into place only after a complete
+ * 200 response, so a file at `dest` is always whole: a download cut off by a crash, a kill or a timeout
+ * leaves only a `.part` file, which the next attempt overwrites.
+ */
 export async function downloadFile(url: string, dest: string, headers: Record<string, string>) {
   if (await exists(dest)) return;
+  const part = `${dest}.part`;
   let last: unknown;
   for (let attempt = 0; attempt < 3; attempt++) {
     try {
+      await FS.deleteAsync(part, { idempotent: true }).catch(() => {});
       // A stalled connection never errors on its own, so each file gets a time limit and is cancelled.
-      const dl = FS.createDownloadResumable(url, dest, { headers });
+      const dl = FS.createDownloadResumable(url, part, { headers });
       const timer = setTimeout(() => dl.cancelAsync().catch(() => {}), FILE_TIMEOUT_MS);
       let res;
       try {
@@ -36,14 +46,18 @@ export async function downloadFile(url: string, dest: string, headers: Record<st
         clearTimeout(timer);
       }
       if (!res) throw new Error('Image request timed out');
-      if (res.status === 200) return;
+      if (res.status === 200 && (await exists(part))) {
+        await FS.deleteAsync(dest, { idempotent: true }).catch(() => {});
+        await FS.moveAsync({ from: part, to: dest });
+        return;
+      }
       last = new Error(`Image request answered ${res.status}`);
     } catch (e) {
       last = e;
     }
     await new Promise((r) => setTimeout(r, 400 * (attempt + 1)));
   }
-  await FS.deleteAsync(dest, { idempotent: true }).catch(() => {});
+  await FS.deleteAsync(part, { idempotent: true }).catch(() => {});
   throw new FriendlyError(friendly(last));
 }
 

@@ -33,7 +33,7 @@ export const hentai20: Source = {
   },
 
   async chapters(series) {
-    const html = await getText(`${SITE}/manga/${series.id}/`);
+    const html = await getText(`${SITE}/manga/${encodeURIComponent(series.id)}/`);
     const list = html.split('id="chapterlist"')[1] ?? '';
     const out: Chapter[] = [];
     const re = /<a href="(https:\/\/hentai20\.io\/([^/"]+)\/)">\s*<span class="chapternum">([^<]*)<\/span>/g;

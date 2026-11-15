@@ -22,7 +22,7 @@ export function useUpdater() {
         `Version ${info.versionName || info.versionCode} is ready.${info.notes ? `\n\n${info.notes}` : ''}`,
         [
           { text: 'Later', style: 'cancel' },
-          { text: 'Download', onPress: openDownload },
+          { text: 'Get it', onPress: openDownload },
         ],
       ),
     [],

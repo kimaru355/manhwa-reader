@@ -22,7 +22,7 @@ export default function Novel() {
   const insets = useSafeAreaInsets();
   const params = useLocalSearchParams<{ ref?: string; ch?: string }>();
   const series = parseRef(params.ref);
-  const { chapters } = useChapters(series);
+  const { chapters, error: listError, offline: listPending, reload } = useChapters(series);
   const { saveProgress } = useLibrary();
   const [chapterId, setChapterId] = useState(params.ch ?? '');
   const [paras, setParas] = useState<string[] | null>(null);
@@ -33,6 +33,8 @@ export default function Novel() {
 
   const index = chapters.findIndex((c) => c.id === chapterId);
   const chapter = index >= 0 ? chapters[index] : undefined;
+  // The chapter list failed to load, or loaded without this chapter: say so instead of loading forever.
+  const missing = !chapter && (!!listError || !listPending);
 
   useEffect(() => {
     AsyncStorage.getItem(SIZE_KEY)
@@ -120,6 +122,14 @@ export default function Novel() {
 
       {error ? (
         <EmptyState icon="cloud-offline-outline" title="Couldn't load this chapter" message={error} action="Try again" onAction={() => setAttempt((n) => n + 1)} />
+      ) : missing ? (
+        <EmptyState
+          icon="cloud-offline-outline"
+          title="Couldn't load this chapter"
+          message={listError ?? "This chapter isn't available any more."}
+          action="Try again"
+          onAction={reload}
+        />
       ) : !paras ? (
         <View style={styles.center}>
           <ActivityIndicator color={t.accent} size="large" />

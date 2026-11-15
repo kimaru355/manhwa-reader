@@ -1,3 +1,5 @@
+import type { CategoryState } from './listCategories';
+
 export type Folder = {
   uri: string;
   name: string;
@@ -87,6 +89,8 @@ export type Snapshot = {
   wishlist: Series[];
   recents: Recent[];
   bookmarks: Bookmark[];
+  /** The reader's categories for favorites and the wishlist. Missing in backups made before 1.4.0. */
+  categories?: CategoryState;
 };
 
 export type DownloadedChapter = Chapter & {

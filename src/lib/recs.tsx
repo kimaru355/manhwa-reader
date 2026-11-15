@@ -1,5 +1,5 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from 'react';
+import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode, useRef } from 'react';
 
 import bundled from '../data/recommendations.json';
 import { API_BASE_URL } from './config';
@@ -30,6 +30,7 @@ export function parseRecs(raw: unknown): RecsFile {
   const o = (raw ?? {}) as Record<string, unknown>;
   const list = Array.isArray(o.recommendations) ? o.recommendations : [];
   const recommendations: Recommendation[] = [];
+  const seen = new Set<string>();
   for (const r of list as Record<string, unknown>[]) {
     const source = r?.source as SourceId;
     const category = r?.category as Category;
@@ -37,6 +38,8 @@ export function parseRecs(raw: unknown): RecsFile {
     const id = str(r?.id);
     const title = str(r?.title);
     if (!SOURCES.includes(source) || !CATEGORIES.includes(category) || !TIERS.includes(tier) || !id || !title) continue;
+    if (seen.has(`${source}:${id}`)) continue;
+    seen.add(`${source}:${id}`);
     const bookmarks = (Array.isArray(r.bookmarks) ? r.bookmarks : [])
       .map((b: Record<string, unknown>): AuthorBookmark | null => {
         const chapterId = str(b?.chapterId);
@@ -108,9 +111,13 @@ export function RecsProvider({ children }: { children: ReactNode }) {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  /** The newest request; an older one that answers late must not replace what it loaded. */
+  const latest = useRef(0);
+
   const refresh = useCallback(async (target?: string) => {
     const u = (target ?? '').trim();
     if (!u) return;
+    const mine = ++latest.current;
     setLoading(true);
     setError(null);
     try {
@@ -118,13 +125,15 @@ export function RecsProvider({ children }: { children: ReactNode }) {
       if (!res.ok) throw new Error(`answered ${res.status}`);
       const text = await res.text();
       const parsed = parseRecs(JSON.parse(text));
+      if (mine !== latest.current) return;
       setRecs(parsed);
       AsyncStorage.setItem(KEYS.cache, text).catch(() => {});
     } catch (e) {
+      if (mine !== latest.current) return;
       setError(`Couldn't update recommendations. ${friendly(e)} Showing the last saved list.`);
       toastError(e);
     } finally {
-      setLoading(false);
+      if (mine === latest.current) setLoading(false);
     }
   }, []);
 
@@ -134,7 +143,8 @@ export function RecsProvider({ children }: { children: ReactNode }) {
         AsyncStorage.getItem(KEYS.url).catch(() => null),
         AsyncStorage.getItem(KEYS.cache).catch(() => null),
       ]);
-      const u = savedUrl ?? DEFAULT_RECS_URL;
+      // An empty saved link (older versions stored one) means the app's own list.
+      const u = savedUrl?.trim() || DEFAULT_RECS_URL;
       setUrlState(u);
       if (cached) {
         try {
@@ -148,6 +158,15 @@ export function RecsProvider({ children }: { children: ReactNode }) {
   const setUrl = useCallback(
     (next: string) => {
       const u = next.trim();
+      if (!u) {
+        // Left empty: back to the app's own list. What was loaded from the other link is dropped, so the
+        // list built into the app shows until the author's current one arrives.
+        setUrlState(DEFAULT_RECS_URL);
+        setRecs(parseRecs(bundled));
+        AsyncStorage.multiRemove([KEYS.url, KEYS.cache]).catch(() => {});
+        refresh(DEFAULT_RECS_URL);
+        return;
+      }
       setUrlState(u);
       AsyncStorage.setItem(KEYS.url, u).catch(() => {});
       refresh(u);

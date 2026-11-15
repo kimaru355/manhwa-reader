@@ -60,7 +60,7 @@ export const mangadex: Source = {
     const out: Chapter[] = [];
     const seen = new Set<string>();
     for (let offset = 0; offset < 10_000; offset += 500) {
-      const url = `${API}/manga/${series.id}/feed?${qs([
+      const url = `${API}/manga/${encodeURIComponent(series.id)}/feed?${qs([
         ['limit', 500],
         ['offset', offset],
         ['translatedLanguage[]', 'en'],
@@ -87,7 +87,7 @@ export const mangadex: Source = {
 
   async pages(_series, chapter) {
     const res = await getJson<{ baseUrl: string; chapter: { hash: string; data: string[] } }>(
-      `${API}/at-home/server/${chapter.id}`,
+      `${API}/at-home/server/${encodeURIComponent(chapter.id)}`,
       HEADERS,
     );
     return res.chapter.data.map((f) => `${res.baseUrl}/data/${res.chapter.hash}/${f}`);

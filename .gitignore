@@ -45,3 +45,7 @@ yarn-error.*
 # Release signing (never commit)
 keystore.properties
 keystore/
+
+# The website has its own repo (kimaru355/manhwa-reader-web) and lives in this folder
+/site/
+*.keystore

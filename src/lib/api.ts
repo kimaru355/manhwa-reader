@@ -1,4 +1,5 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import * as SecureStore from 'expo-secure-store';
 
 import { API_BASE_URL } from './config';
 import { FriendlyError, friendly } from './errors';
@@ -12,7 +13,8 @@ export type Session = {
   user: { id: string; email: string };
 };
 
-const KEY = 'session2';
+const SECURE_KEY = 'session3';
+const LEGACY_KEY = 'session2';
 const TIMEOUT_MS = 20_000;
 
 let session: Session | null = null;
@@ -60,23 +62,46 @@ async function call(
   }
 }
 
+/**
+ * The login lives in the device keystore (SecureStore), which Android leaves out of backups. If the keystore
+ * refuses it, the login is kept in memory only: the reader stays signed in until the app closes.
+ */
 async function store(next: Session | null) {
   session = next;
-  if (next) await AsyncStorage.setItem(KEY, JSON.stringify(next)).catch(() => {});
-  else await AsyncStorage.removeItem(KEY).catch(() => {});
+  loaded = true;
+  if (next) await SecureStore.setItemAsync(SECURE_KEY, JSON.stringify(next)).catch(() => {});
+  else await SecureStore.deleteItemAsync(SECURE_KEY).catch(() => {});
 }
 
-export async function loadSession(): Promise<Session | null> {
-  if (!loaded) {
-    loaded = true;
+let loading: Promise<Session | null> | null = null;
+
+export function loadSession(): Promise<Session | null> {
+  if (loaded) return Promise.resolve(session);
+  loading ??= (async () => {
+    let found: Session | null = null;
+    let legacy = false;
     try {
-      const raw = await AsyncStorage.getItem(KEY);
-      session = raw ? (JSON.parse(raw) as Session) : null;
+      const raw = await SecureStore.getItemAsync(SECURE_KEY);
+      if (raw) found = JSON.parse(raw) as Session;
+      else {
+        // Builds before 1.3.1 kept the login in AsyncStorage: move it into the keystore once.
+        const old = await AsyncStorage.getItem(LEGACY_KEY).catch(() => null);
+        found = old ? (JSON.parse(old) as Session) : null;
+        legacy = !!found;
+      }
     } catch {
-      session = null;
+      found = null;
     }
-  }
-  return session;
+    // A sign-in or sign-out that happened while reading wins over what was on disk.
+    if (!loaded) {
+      session = found;
+      loaded = true;
+      if (legacy) await store(found);
+    }
+    await AsyncStorage.removeItem(LEGACY_KEY).catch(() => {});
+    return session;
+  })();
+  return loading;
 }
 
 /** `needsConfirmation` means the email must be confirmed before signing in. */
@@ -104,23 +129,33 @@ export async function signOut() {
 /** Always succeeds from the reader's point of view, so nobody can probe which emails have accounts. */
 export const forgotPassword = (email: string) => call('/auth/forgot', { body: { email } }).then(() => undefined);
 
+/** The refresh in progress, shared by every call that needs one so only one request is ever made at a time. */
+let refreshing: Promise<Session> | null = null;
+
 async function freshSession(force = false): Promise<Session> {
   const s = await loadSession();
   if (!s) throw new FriendlyError('Sign in to do that.');
   if (!force && s.expiresAt - 60 > Date.now() / 1000) return s;
-  try {
-    const res = (await call('/auth/refresh', { body: { refreshToken: s.refreshToken } })) as { session: Session };
-    await store(res.session);
-    return res.session;
-  } catch (e) {
-    // A rejected refresh means the login is over; being offline must not log anyone out.
-    const status = (e as Failure).status;
-    if (status === 400 || status === 401) {
-      await store(null);
-      throw new FriendlyError('Your session ended. Please sign in again.');
+  refreshing ??= (async () => {
+    try {
+      const res = (await call('/auth/refresh', { body: { refreshToken: s.refreshToken } })) as { session: Session };
+      // Signed out (or in as someone else) while this was running: don't bring the old login back.
+      if (session?.refreshToken !== s.refreshToken) throw new FriendlyError('Sign in to do that.');
+      await store(res.session);
+      return res.session;
+    } catch (e) {
+      // A rejected refresh means the login is over; being offline must not log anyone out.
+      const status = (e as Failure).status;
+      if ((status === 400 || status === 401) && session?.refreshToken === s.refreshToken) {
+        await store(null);
+        throw new FriendlyError('Your session ended. Please sign in again.');
+      }
+      throw e;
     }
-    throw e;
-  }
+  })().finally(() => {
+    refreshing = null;
+  });
+  return refreshing;
 }
 
 /** Calls a signed-in endpoint, refreshing the access token when needed. */

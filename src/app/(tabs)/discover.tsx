@@ -8,6 +8,7 @@ import { SeriesGrid } from '../../components/SeriesGrid';
 import { friendly, toastError } from '../../lib/errors';
 import { useRecs } from '../../lib/recs';
 import { DEFAULT_SOURCES, getSource } from '../../lib/sources';
+import { confirmAdult } from '../../lib/adult';
 import { useTheme } from '../../lib/theme';
 import type { Category, Series, SourceId } from '../../lib/types';
 
@@ -88,7 +89,8 @@ export default function Discover() {
 
   const { items, loading, hasMore, error, more, reload } = useBrowse(source, query);
 
-  const changeTop = (v: Top) => {
+  const changeTop = async (v: Top) => {
+    if (v === 'interesting' && !(await confirmAdult())) return;
     setTop(v);
     setQuery('');
   };

@@ -9,9 +9,19 @@ import { getSource } from './sources';
 import type { Chapter, Series } from './types';
 import { naturalCompare } from './util';
 
+/** Only plain web links are opened; links can come from other readers, so app schemes (intent:, market:…) are refused. */
+export function isWebLink(url: string | undefined): url is string {
+  if (!url) return false;
+  try {
+    return new URL(url).protocol === 'https:';
+  } catch {
+    return false;
+  }
+}
+
 export function openSeries(series: Series) {
   if (series.source === 'external') {
-    if (series.url) Linking.openURL(series.url).catch(() => {});
+    if (isWebLink(series.url)) Linking.openURL(series.url).catch(() => {});
     return;
   }
   router.push({ pathname: '/series', params: { ref: JSON.stringify(series) } });

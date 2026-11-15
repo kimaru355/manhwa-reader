@@ -51,7 +51,7 @@ export const novelbin: Source = {
   },
 
   async text(series, chapter) {
-    const html = await getText(`${SITE}/novel-book/${series.id}/${chapter.id}`);
+    const html = await getText(`${SITE}/novel-book/${encodeURIComponent(series.id)}/${encodeURIComponent(chapter.id)}`);
     const start = html.indexOf('id="chr-content"');
     if (start < 0) throw new FriendlyError('Chapter text not found.');
     const end = html.indexOf('<hr class="chr-end">', start);

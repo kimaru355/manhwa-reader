@@ -4,6 +4,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { ActivityIndicator, Alert, FlatList, Pressable, RefreshControl, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 
 import { useAccount } from '../lib/account';
+import { confirmAdult } from '../lib/adult';
 import {
   communityToSeries,
   fetchCommunity,
@@ -49,6 +50,8 @@ export function CommunityFeed() {
   const [error, setError] = useState<string | null>(null);
   const run = useRef(0);
   const busy = useRef(false);
+  /** Recommendations whose vote is being saved; a second tap waits for the first to finish. */
+  const voting = useRef(new Set<string>());
 
   const load = useCallback(
     async (reset: boolean, from: string | null) => {
@@ -105,6 +108,8 @@ export function CommunityFeed() {
       ]);
       return;
     }
+    if (voting.current.has(rec.id)) return;
+    voting.current.add(rec.id);
     const apply = (r: CommunityRec, voted: boolean, votes: number) => (r.id === rec.id ? { ...r, voted, votes } : r);
     // Shown at once; put back if the server says no.
     setItems((prev) => prev.map((r) => apply(r, !rec.voted, Math.max(rec.votes + (rec.voted ? -1 : 1), 0))));
@@ -114,6 +119,8 @@ export function CommunityFeed() {
     } catch (e) {
       setItems((prev) => prev.map((r) => apply(r, rec.voted, rec.votes)));
       Alert.alert("Couldn't save your vote", friendly(e));
+    } finally {
+      voting.current.delete(rec.id);
     }
   };
 
@@ -143,7 +150,12 @@ export function CommunityFeed() {
           {SORTS.map((s) => chip(s.label, sort === s.value, () => setSort(s.value)))}
         </ScrollView>
         <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.chips}>
-          {CATEGORIES.map((c) => chip(c.label, category === c.value, () => setCategory(c.value)))}
+          {CATEGORIES.map((c) =>
+            chip(c.label, category === c.value, async () => {
+              if (c.value === 'adult' && !(await confirmAdult())) return;
+              setCategory(c.value);
+            }),
+          )}
         </ScrollView>
         <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.chips}>
           {chip('Any tier', tier === 'all', () => setTier('all'))}

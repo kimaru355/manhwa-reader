@@ -4,7 +4,8 @@ import { Linking, Platform } from 'react-native';
 import { API_BASE_URL } from './config';
 import { FriendlyError, friendly } from './errors';
 
-const APK_URL = `${API_BASE_URL}/manhwa-reader.apk`;
+/** The website's download page, which offers the build for most phones and the one for older (32-bit) phones. */
+const DOWNLOAD_URL = `${API_BASE_URL}/download`;
 const VERSION_URL = `${API_BASE_URL}/version.json`;
 
 export type UpdateInfo = { versionCode: number; versionName: string; notes?: string };
@@ -34,5 +35,5 @@ export async function checkForUpdate(): Promise<UpdateInfo | null> {
   }
 }
 
-/** Opens the download link in the browser; the person installs the new build from there. */
-export const openDownload = () => Linking.openURL(APK_URL).catch(() => {});
+/** Opens the download page in the browser; the person picks and installs the new build from there. */
+export const openDownload = () => Linking.openURL(DOWNLOAD_URL).catch(() => {});

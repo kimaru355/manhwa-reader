@@ -30,9 +30,18 @@ export function qs(params: (readonly [string, string | number])[]): string {
 
 const ENTITIES: Record<string, string> = { amp: '&', lt: '<', gt: '>', quot: '"', apos: "'", nbsp: ' ' };
 
+/** The character with this code, or the text as written when the code isn't a real character. */
+const fromCode = (code: number, written: string) => {
+  try {
+    return String.fromCodePoint(code);
+  } catch {
+    return written;
+  }
+};
+
 export const decodeHtml = (s: string) =>
   s
-    .replace(/&#(\d+);/g, (_, n) => String.fromCodePoint(Number(n)))
-    .replace(/&#x([0-9a-f]+);/gi, (_, n) => String.fromCodePoint(parseInt(n, 16)))
+    .replace(/&#(\d+);/g, (m, n) => fromCode(Number(n), m))
+    .replace(/&#x([0-9a-f]+);/gi, (m, n) => fromCode(parseInt(n, 16), m))
     .replace(/&([a-z]+);/gi, (m, n) => ENTITIES[n.toLowerCase()] ?? m)
     .trim();

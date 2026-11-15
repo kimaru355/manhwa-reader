@@ -17,8 +17,9 @@ export default function Account() {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [busy, setBusy] = useState(false);
-  const [recs, setRecs] = useState<UserRecommendation[] | null>(null);
-  const [suggestions, setSuggestions] = useState<Suggestion[] | null>(null);
+  // undefined = still loading, null = couldn't load.
+  const [recs, setRecs] = useState<UserRecommendation[] | null | undefined>(undefined);
+  const [suggestions, setSuggestions] = useState<Suggestion[] | null | undefined>(undefined);
 
   const loadRecs = useCallback(() => {
     acc
@@ -157,7 +158,9 @@ export default function Account() {
             </View>
 
             <Text style={[styles.section, { color: t.sub }]}>YOUR RECOMMENDATIONS</Text>
-            {recs === null ? (
+            {recs === undefined ? (
+              <ActivityIndicator color={t.accent} style={{ alignSelf: 'flex-start' }} />
+            ) : recs === null ? (
               <Text style={[styles.hint, { color: t.sub }]}>Couldn’t load them right now.</Text>
             ) : recs.length === 0 ? (
               <Text style={[styles.hint, { color: t.sub }]}>
@@ -183,7 +186,9 @@ export default function Account() {
             )}
 
             <Text style={[styles.section, { color: t.sub }]}>YOUR BOOKMARK SUGGESTIONS</Text>
-            {suggestions === null ? (
+            {suggestions === undefined ? (
+              <ActivityIndicator color={t.accent} style={{ alignSelf: 'flex-start' }} />
+            ) : suggestions === null ? (
               <Text style={[styles.hint, { color: t.sub }]}>Couldn’t load them right now.</Text>
             ) : suggestions.length === 0 ? (
               <Text style={[styles.hint, { color: t.sub }]}>

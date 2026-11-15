@@ -1,14 +1,15 @@
 import * as DocumentPicker from 'expo-document-picker';
 import * as FS from 'expo-file-system/legacy';
+import * as Sharing from 'expo-sharing';
 
+import { parseCategories } from './listCategories';
+import { cleanBookmark, cleanList, cleanRecent, cleanSeries } from './snapshotShape';
 import type { Folder, Snapshot } from './types';
 import { nameFromUri } from './util';
 
 const SAF = FS.StorageAccessFramework;
 export const BACKUP_DIR = 'manhwa-reader';
 const FILE_BASE = 'manhwa-reader-data';
-
-const isArr = (v: unknown): v is unknown[] => Array.isArray(v);
 
 /** Returns a clean snapshot, or null if the text is not a Manhwa Reader backup. */
 export function parseSnapshot(text: string): Snapshot | null {
@@ -21,10 +22,12 @@ export function parseSnapshot(text: string): Snapshot | null {
       app: 'manhwa-reader',
       version: 2,
       savedAt: typeof o.savedAt === 'number' ? o.savedAt : Date.now(),
-      favorites: isArr(o.favorites) ? (o.favorites as Snapshot['favorites']) : [],
-      wishlist: isArr(o.wishlist) ? (o.wishlist as Snapshot['wishlist']) : [],
-      recents: isArr(o.recents) ? (o.recents as Snapshot['recents']) : [],
-      bookmarks: isArr(o.bookmarks) ? (o.bookmarks as Snapshot['bookmarks']) : [],
+      // Entries that aren't what the app expects (a damaged or hand-edited file) are left out.
+      favorites: cleanList(o.favorites, cleanSeries, (s) => s.key),
+      wishlist: cleanList(o.wishlist, cleanSeries, (s) => s.key),
+      recents: cleanList(o.recents, cleanRecent, (r) => r.series.key),
+      bookmarks: cleanList(o.bookmarks, cleanBookmark, (b) => b.id),
+      ...(o.categories ? { categories: parseCategories(o.categories) } : {}),
     };
   } catch (e) {
     if (e instanceof Error && e.message.startsWith('This backup')) throw e;
@@ -83,6 +86,19 @@ export async function exportSnapshot(snapshot: Snapshot): Promise<string | null>
   const file = await SAF.createFileAsync(res.directoryUri, `manhwa-reader-export-${day}.json`, 'application/json');
   await FS.writeAsStringAsync(file, JSON.stringify(snapshot));
   return nameFromUri(res.directoryUri) || 'the folder';
+}
+
+/**
+ * Writes the data to a file and opens Android's share sheet, so it can be sent to another phone (Bluetooth,
+ * Quick Share, a chat app…) or saved anywhere. Returns false when sharing isn't available on this device.
+ */
+export async function shareSnapshot(snapshot: Snapshot): Promise<boolean> {
+  if (!(await Sharing.isAvailableAsync())) return false;
+  const day = new Date().toISOString().slice(0, 10);
+  const file = `${FS.cacheDirectory}manhwa-reader-export-${day}.json`;
+  await FS.writeAsStringAsync(file, JSON.stringify(snapshot));
+  await Sharing.shareAsync(file, { mimeType: 'application/json', dialogTitle: 'Share your Manhwa Reader data' });
+  return true;
 }
 
 /** Lets the user pick a backup file. Null if cancelled; throws if the file is not a backup. */
