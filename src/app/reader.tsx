@@ -310,6 +310,13 @@ export default function Reader() {
       ]);
       return;
     }
+    if (!b.note.trim()) {
+      Alert.alert(
+        'Add a note first',
+        'Say what happens on this page so other readers know why it is worth reading. Tap the pencil next to the bookmark to add one.',
+      );
+      return;
+    }
     Alert.alert('Suggest this bookmark?', `${b.chapterName} · p.${b.page}
 An admin reviews it before anyone else sees it.`, [
       { text: 'Cancel', style: 'cancel' },

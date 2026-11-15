@@ -104,7 +104,7 @@ export function BookmarksSheet({ visible, onClose, chapters, current, bookmarks,
                   <TextInput
                     value={note}
                     onChangeText={setNote}
-                    placeholder="Add a note (optional), e.g. peak fight"
+                    placeholder="What happens here? e.g. peak fight (needed to share)"
                     placeholderTextColor="#777"
                     style={styles.input}
                     maxLength={200}

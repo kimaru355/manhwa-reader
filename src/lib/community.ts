@@ -122,7 +122,7 @@ export const submitBookmark = (
       chapterId: b.chapterId,
       chapterName: b.chapterName,
       page: b.page,
-      note: b.note.trim() || null,
+      note: b.note.trim(),
     },
   });
 
