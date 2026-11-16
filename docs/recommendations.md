@@ -1,7 +1,7 @@
 # Recommendations file
 
 Home is built from one JSON file. The app fetches it from `DEFAULT_RECS_URL` in `src/lib/recs.tsx`
-(`https://manhwa-reader.kimaru355.co.ke/recommendations.json`) on launch and on pull-to-refresh, and caches the last
+(`https://manhwa-reader.top/recommendations.json`) on launch and on pull-to-refresh, and caches the last
 good copy. A different link can be pasted in **Settings → Author recommendations**. If nothing has been fetched yet
 it falls back to `src/data/recommendations.json`, which doubles as a sample of every field: copy it, replace the
 `SAMPLE` entries with real ones, and upload it to the URL above.
