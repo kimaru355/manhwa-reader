@@ -1,7 +1,10 @@
 // Copies a release build's two APKs into the website with their published names and updates version.json,
-// so the site's download page and the app's update check both point at the new version.
+// so the site's download page and the app's update check both point at the new version, and adds the version
+// to the download page's version history (site/lib/changelog.ts).
 //
-//   npm run publish:apks -- "What changed in this version"
+//   npm run publish:apks -- "First change in this version." "Second change." ...
+//
+// Each argument is one line in the version history; together they are the notes the app's update check shows.
 //
 // Run it after building the release (see docs/releasing.md). It reads the version from app.json.
 //   android/app/build/outputs/apk/release/app-arm64-v8a-release.apk   -> site/public/manhwa-reader-v<version>.apk
@@ -9,6 +12,8 @@
 // Older APKs in site/public are removed so the site repo doesn't keep growing.
 import { copyFileSync, existsSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
+
+import { withEntry } from './changelog.mjs';
 
 // Keep these in step with site/lib/apk.ts.
 export const standardApk = (v) => `manhwa-reader-v${v}.apk`;
@@ -21,7 +26,8 @@ const site = join(root, 'site/public');
 const version = JSON.parse(readFileSync(join(root, 'app.json'), 'utf8')).expo.version;
 const [major = 0, minor = 0, patch = 0] = String(version).split('.').map((n) => parseInt(n, 10) || 0);
 const versionCode = major * 10000 + minor * 100 + patch; // same rule as app.config.js
-const notes = process.argv.slice(2).join(' ').trim();
+const changes = process.argv.slice(2).map((a) => a.trim()).filter(Boolean);
+const notes = changes.join(' ');
 
 const builds = [
   { from: join(out, 'app-arm64-v8a-release.apk'), to: standardApk(version), label: 'most phones (64-bit)' },
@@ -37,6 +43,17 @@ if (!existsSync(site)) fail(`No website folder at ${site}.`);
 for (const b of builds) {
   if (!existsSync(b.from)) {
     fail(`Missing ${b.from}.\nBuild the release first (docs/releasing.md); the ABI split makes one APK per architecture.`);
+  }
+}
+// Worked out before anything is copied, so a changelog in an unexpected shape stops the script early.
+const changelogPath = join(root, 'site/lib/changelog.ts');
+let changelog = null;
+if (changes.length) {
+  if (!existsSync(changelogPath)) fail(`No version history at ${changelogPath}.`);
+  try {
+    changelog = withEntry(readFileSync(changelogPath, 'utf8'), version, new Date().toLocaleDateString('en-CA'), changes);
+  } catch (e) {
+    fail(`Couldn't add ${version} to ${changelogPath}: ${e.message}`);
   }
 }
 const built = Math.min(...builds.map((b) => statSync(b.from).mtimeMs));
@@ -67,4 +84,10 @@ const info = { versionCode, versionName: version, notes: notes || (prev.versionN
 if (!info.notes) delete info.notes;
 writeFileSync(join(site, 'version.json'), JSON.stringify(info, null, 2) + '\n');
 console.log(`version.json -> ${versionCode} (${version})${info.notes ? '' : '  [no notes: pass them as an argument]'}`);
+if (changelog) {
+  writeFileSync(changelogPath, changelog);
+  console.log(`changelog.ts -> ${version} with ${changes.length} change${changes.length === 1 ? '' : 's'}`);
+} else {
+  console.log("changelog.ts -> unchanged  [no notes: the download page shows version.json's notes for this version]");
+}
 console.log('\nNow commit and deploy the site.');

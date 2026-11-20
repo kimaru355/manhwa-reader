@@ -17,12 +17,14 @@ new key. Without `keystore.properties` a build falls back to the debug key.
    two APKs (`plugins/withAbiSplits.js`), in `android/app/build/outputs/apk/release/`:
    - `app-arm64-v8a-release.apk`: most phones (64-bit)
    - `app-armeabi-v7a-release.apk`: older phones that only run 32-bit apps
-4. Put them on the website: `npm run publish:apks -- "Short notes about this version"`. This copies them into
-   `site/public/` as
+4. Put them on the website: `npm run publish:apks -- "First change." "Second change."`. Each argument is one
+   line of the version's entry in the download page's version history. This copies the APKs into `site/public/` as
    - `manhwa-reader-v<version>.apk`
    - `manhwa-reader-older-android-v<version>.apk`
 
-   writes `site/public/version.json` (versionCode, versionName, notes), and removes older published APKs.
+   writes `site/public/version.json` (versionCode, versionName, and the changes joined as its notes), adds the
+   version at the top of `site/lib/changelog.ts` (or replaces its entry when publishing the same version again),
+   and removes older published APKs.
 5. Commit and deploy the site. The app's update check reads `version.json`, and "Get it" opens the site's
    `/download` page, which offers both APKs.
 
