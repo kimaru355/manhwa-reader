@@ -192,7 +192,7 @@ export default function Discover() {
 const styles = StyleSheet.create({
   flex: { flex: 1 },
   center: { paddingTop: 60, alignItems: 'center' },
-  chips: { flexDirection: 'row', gap: 8, marginHorizontal: 12, marginTop: 10 },
+  chips: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginHorizontal: 12, marginTop: 10 },
   chip: { paddingHorizontal: 12, paddingVertical: 6, borderRadius: 16 },
   search: {
     flexDirection: 'row',

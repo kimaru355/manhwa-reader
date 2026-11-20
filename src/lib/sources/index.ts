@@ -6,10 +6,12 @@ import { mangakatana } from './mangakatana';
 import { mangapill } from './mangapill';
 import { mangaread } from './mangaread';
 import { novelbin } from './novelbin';
+import { novelfire } from './novelfire';
+import { standardebooks } from './standardebooks';
 import type { Source } from './types';
 import { webtoons } from './webtoons';
 
-const ALL: Record<Exclude<SourceId, 'external'>, Source> = { mangadex, mangapill, mangaread, mangakatana, webtoons, hentai20, novelbin };
+const ALL: Record<Exclude<SourceId, 'external'>, Source> = { mangadex, mangapill, mangaread, mangakatana, webtoons, hentai20, novelbin, novelfire, standardebooks };
 
 export const getSource = (id: SourceId): Source | undefined => (id === 'external' ? undefined : ALL[id]);
 
@@ -19,7 +21,8 @@ export const DEFAULT_SOURCES: Record<Category, SourceId[]> = {
   manga: ['mangapill', 'mangaread', 'mangakatana'],
   manhwa: ['webtoons'],
   interesting: ['hentai20'],
-  novel: ['novelbin'],
+  // Translated web and light novels, then classic English and Western novels.
+  novel: ['novelbin', 'novelfire', 'standardebooks'],
 };
 
 export const imageHeaders = (s: Pick<Series, 'source'>): Record<string, string> =>

@@ -28,20 +28,4 @@ export function qs(params: (readonly [string, string | number])[]): string {
   return params.map(([k, v]) => `${k}=${encodeURIComponent(String(v))}`).join('&');
 }
 
-const ENTITIES: Record<string, string> = { amp: '&', lt: '<', gt: '>', quot: '"', apos: "'", nbsp: ' ' };
-
-/** The character with this code, or the text as written when the code isn't a real character. */
-const fromCode = (code: number, written: string) => {
-  try {
-    return String.fromCodePoint(code);
-  } catch {
-    return written;
-  }
-};
-
-export const decodeHtml = (s: string) =>
-  s
-    .replace(/&#(\d+);/g, (m, n) => fromCode(Number(n), m))
-    .replace(/&#x([0-9a-f]+);/gi, (m, n) => fromCode(parseInt(n, 16), m))
-    .replace(/&([a-z]+);/gi, (m, n) => ENTITIES[n.toLowerCase()] ?? m)
-    .trim();
+export { decodeHtml } from './html';
