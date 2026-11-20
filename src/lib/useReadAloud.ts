@@ -85,60 +85,78 @@ export function useReadAloud({ paras, chapterName, seriesTitle, onChapterEnd }: 
     setPos(i);
   };
 
-  // Speech callbacks start the next chunk through this ref (a callback can't name itself).
-  const again = useRef<(i: number) => void>(() => {});
-  const speakFrom = useCallback((i: number) => {
-    const my = ++gen.current;
-    const list = chunksRef.current;
-    if (i >= list.length) {
-      moveTo(0);
-      if (list.length && endRef.current()) {
-        continuing.current = true;
-        setStatus('next');
-      } else {
-        setStatus('idle');
-      }
-      return;
-    }
-    moveTo(i);
-    setStatus('playing');
-    const chosen = voiceRef.current;
-    const v = chosen.id && chosen.id === badVoice.current ? DEFAULT_VOICE : chosen;
-    stopping.current.then(() => {
-      if (gen.current !== my) return;
-      Speech.speak(list[i].text, {
-        rate: speedRef.current,
-        voice: v.id,
-        language: v.language ?? 'en',
-        onDone: () => {
-          if (gen.current === my) again.current(i + 1);
-        },
-        onError: () => {
-          if (gen.current !== my) return;
-          // A chosen voice can fail if its data was removed; use the phone default for it from now on.
-          if (v.id) {
-            badVoice.current = v.id;
-            again.current(i);
-            return;
-          }
-          gen.current++;
-          setStatus('paused');
-          if (Platform.OS === 'android') {
-            ToastAndroid.show("Read aloud stopped. Check Text-to-speech in your phone's settings.", ToastAndroid.LONG);
-          }
-        },
-      });
-    });
-  }, []);
-
-  useEffect(() => {
-    again.current = speakFrom;
-  }, [speakFrom]);
-
   const halt = useCallback(() => {
     gen.current++;
     stopping.current = Speech.stop().catch(() => {});
   }, []);
+
+  // Speech callbacks start over through this ref (a callback can't name itself).
+  const again = useRef<(i: number) => void>(() => {});
+  /**
+   * Reads from chunk `i`. The engine always has the next sentence queued behind the one being read, so there
+   * is no pause between them; `onStart` says which one is being heard.
+   */
+  const speakFrom = useCallback(
+    (i: number) => {
+      const my = ++gen.current;
+      const list = chunksRef.current;
+      if (i >= list.length) {
+        moveTo(0);
+        if (list.length && endRef.current()) {
+          continuing.current = true;
+          setStatus('next');
+        } else {
+          setStatus('idle');
+        }
+        return;
+      }
+      moveTo(i);
+      setStatus('playing');
+      const chosen = voiceRef.current;
+      const v = chosen.id && chosen.id === badVoice.current ? DEFAULT_VOICE : chosen;
+      const say = (j: number) => {
+        if (j >= list.length) return;
+        Speech.speak(list[j].text, {
+          rate: speedRef.current,
+          voice: v.id,
+          language: v.language ?? 'en',
+          onStart: () => {
+            if (gen.current === my) moveTo(j);
+          },
+          onDone: () => {
+            if (gen.current !== my) return;
+            if (j >= list.length - 1) again.current(list.length); // the chapter is done
+            else say(j + 2);
+          },
+          onError: () => {
+            if (gen.current !== my) return;
+            // A chosen voice can fail if its data was removed; use the phone default for it from now on.
+            if (v.id) {
+              badVoice.current = v.id;
+              halt();
+              again.current(j);
+              return;
+            }
+            halt();
+            setStatus('paused');
+            if (Platform.OS === 'android') {
+              ToastAndroid.show("Read aloud stopped. Check Text-to-speech in your phone's settings.", ToastAndroid.LONG);
+            }
+          },
+        });
+      };
+      stopping.current.then(() => {
+        if (gen.current !== my) return;
+        say(i);
+        say(i + 1);
+      });
+    },
+    [halt],
+  );
+
+  useEffect(() => {
+    again.current = speakFrom;
+  }, [speakFrom]);
 
   // A new chapter: stop, and carry on from its start if the last one was read to the end.
   useEffect(() => {
@@ -267,6 +285,8 @@ export function useReadAloud({ paras, chapterName, seriesTitle, onChapterEnd }: 
     para: current?.para,
     /** Where in that paragraph, 0..1. */
     at: current?.at ?? 0,
+    /** The sentence (or phrase) being read: its characters in that paragraph. */
+    range: current ? { start: current.start, end: current.end } : undefined,
     canRead: chunks.length > 0,
     play,
     pause,

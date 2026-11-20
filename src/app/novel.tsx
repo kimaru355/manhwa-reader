@@ -9,6 +9,7 @@ import { EmptyState } from '../components/EmptyState';
 import { readDownloadedText, useDownloads } from '../lib/downloads';
 import { friendly, toastError } from '../lib/errors';
 import { useLibrary } from '../lib/library';
+import { ChapterListSheet } from '../components/ChapterListSheet';
 import { Comments } from '../components/Comments';
 import { ReadAloudBar } from '../components/ReadAloudBar';
 import { parseRef, useChapters } from '../lib/series';
@@ -36,6 +37,7 @@ export default function Novel() {
   const [size, setSize] = useState(18);
   const scroll = useRef<React.ComponentRef<typeof ScrollView>>(null);
   const [aloudOpen, setAloudOpen] = useState(false);
+  const [listOpen, setListOpen] = useState(false);
   // Where each paragraph sits in the scroll content, and the view, for following along.
   const paraBox = useRef<{ y: number; h: number }[]>([]);
   const scrollY = useRef(0);
@@ -168,6 +170,9 @@ export default function Novel() {
         <Text numberOfLines={1} style={[styles.barTitle, { color: t.text }]}>
           {chapter?.name ?? series.title}
         </Text>
+        <Pressable accessibilityRole="button" accessibilityLabel="Chapters" hitSlop={10} onPress={() => setListOpen(true)} disabled={!chapters.length}>
+          <Ionicons name="list" size={24} color={t.sub} />
+        </Pressable>
         <Pressable accessibilityRole="button" accessibilityLabel="Read aloud" hitSlop={10} onPress={openAloud}>
           <Ionicons name={aloudOpen ? 'headset' : 'headset-outline'} size={23} color={aloudOpen ? t.accent : t.sub} />
         </Pressable>
@@ -196,7 +201,7 @@ export default function Novel() {
       ) : (
         <ScrollView
           ref={scroll}
-          contentContainerStyle={[styles.body, { paddingBottom: (aloudOpen ? 0 : insets.bottom) + 24 }]}
+          contentContainerStyle={[styles.body, { paddingBottom: chapters.length || aloudOpen ? 24 : insets.bottom + 24 }]}
           scrollEventThrottle={100}
           onScroll={(e) => {
             scrollY.current = e.nativeEvent.contentOffset.y;
@@ -220,7 +225,16 @@ export default function Novel() {
                 aloudOpen && aloud.para === i && { backgroundColor: t.card },
               ]}
             >
-              {p}
+              {aloudOpen && aloud.para === i && aloud.range ? (
+                <>
+                  {p.slice(0, aloud.range.start)}
+                  {/* The sentence being read. */}
+                  <Text style={{ backgroundColor: `${t.accent}40`, color: t.text }}>{p.slice(aloud.range.start, aloud.range.end)}</Text>
+                  {p.slice(aloud.range.end)}
+                </>
+              ) : (
+                p
+              )}
             </Text>
           ))}
           {nav}
@@ -229,6 +243,44 @@ export default function Novel() {
           ) : null}
         </ScrollView>
       )}
+
+      {!aloudOpen && chapters.length ? (
+        <View style={[styles.chapterBar, { borderTopColor: t.border, backgroundColor: t.bg, paddingBottom: insets.bottom + 6 }]}>
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel="Previous chapter"
+            disabled={index <= 0}
+            onPress={() => go(-1)}
+            style={[styles.barBtn, { opacity: index > 0 ? 1 : 0.35 }]}
+          >
+            <Ionicons name="chevron-back" size={20} color={t.text} />
+            <Text style={{ color: t.text }}>Previous</Text>
+          </Pressable>
+          <Pressable accessibilityRole="button" accessibilityLabel="Chapters" onPress={() => setListOpen(true)} style={styles.barMid}>
+            <Ionicons name="list" size={18} color={t.sub} />
+            <Text style={{ color: t.sub, fontSize: 13 }}>{index >= 0 ? `${index + 1} / ${chapters.length}` : 'Chapters'}</Text>
+          </Pressable>
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel="Next chapter"
+            disabled={index < 0 || index >= chapters.length - 1}
+            onPress={() => go(1)}
+            style={[styles.barBtn, { opacity: index >= 0 && index < chapters.length - 1 ? 1 : 0.35 }]}
+          >
+            <Text style={{ color: t.accent, fontWeight: '600' }}>Next</Text>
+            <Ionicons name="chevron-forward" size={20} color={t.accent} />
+          </Pressable>
+        </View>
+      ) : null}
+
+      <ChapterListSheet
+        visible={listOpen}
+        onClose={() => setListOpen(false)}
+        chapters={chapters}
+        currentId={chapter?.id}
+        isDownloaded={(id) => !!(series && getChapter(series.key, id))}
+        onPick={(c) => setChapterId(c.id)}
+      />
 
       {aloudOpen ? (
         <ReadAloudBar
@@ -265,5 +317,8 @@ const styles = StyleSheet.create({
   // Same padding with or without the read-aloud highlight, so text doesn't shift.
   para: { marginHorizontal: -6, paddingHorizontal: 6, borderRadius: 6 },
   nav: { flexDirection: 'row', justifyContent: 'space-between', marginTop: 12 },
+  chapterBar: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', borderTopWidth: StyleSheet.hairlineWidth, paddingHorizontal: 8, paddingTop: 6 },
+  barBtn: { flexDirection: 'row', alignItems: 'center', gap: 2, paddingHorizontal: 10, paddingVertical: 8 },
+  barMid: { flexDirection: 'row', alignItems: 'center', gap: 6, paddingHorizontal: 12, paddingVertical: 8 },
   navBtn: { flexDirection: 'row', alignItems: 'center', gap: 4, paddingHorizontal: 16, paddingVertical: 10, borderRadius: 10, borderWidth: 1 },
 });

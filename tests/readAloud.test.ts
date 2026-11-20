@@ -9,6 +9,7 @@ import {
   parseSpeed,
   pickVoices,
   SPEEDS,
+  splitSentences,
   splitText,
   toChunks,
   voiceOptions,
@@ -28,8 +29,8 @@ test('speeds are exactly 1x to 2x in quarter steps', () => {
 test('short paragraphs are one chunk each; blank and separator lines are skipped', () => {
   const chunks = toChunks(['Hello there.', '* * *', '', 'Second one!']);
   assert.deepEqual(chunks, [
-    { para: 0, text: 'Hello there.', at: 0 },
-    { para: 3, text: 'Second one!', at: 0 },
+    { para: 0, text: 'Hello there.', at: 0, start: 0, end: 12 },
+    { para: 3, text: 'Second one!', at: 0, start: 0, end: 11 },
   ]);
 });
 
@@ -115,4 +116,42 @@ test('voice options are labelled by language and numbered; none means the phone 
   assert.deepEqual(voiceOptions([v('en-us-x-sfg-network', 'en-US')]), [DEFAULT_VOICE]);
   assert.equal(languageLabel('sw'), 'Swahili');
   assert.equal(languageLabel('xx-YY'), 'xx (YY)');
+});
+
+const pieces = (t: string, max?: number) => splitSentences(t, max).map((p) => p.text);
+
+test('paragraphs are read a sentence at a time', () => {
+  assert.deepEqual(pieces('The door opened. Nobody was there! Was it the wind?'), [
+    'The door opened.',
+    'Nobody was there!',
+    'Was it the wind?',
+  ]);
+  // Closing quotes stay with their sentence.
+  assert.deepEqual(pieces('"Run!" she shouted. “Now.” He ran.'), ['"Run!" she shouted.', '“Now.” He ran.']);
+});
+
+test('abbreviations, initials and very short sentences do not split', () => {
+  assert.deepEqual(pieces('Mr. Smith met Dr. Lee at St. Mary. They talked.'), ['Mr. Smith met Dr. Lee at St. Mary.', 'They talked.']);
+  assert.deepEqual(pieces('J. R. Hart arrived. Late again.'), ['J. R. Hart arrived.', 'Late again.']);
+  assert.deepEqual(pieces('Oh. I see what you mean.'), ['Oh. I see what you mean.']);
+  assert.deepEqual(pieces('No ending punctuation'), ['No ending punctuation']);
+});
+
+test('a very long sentence is read a phrase at a time', () => {
+  const long = Array.from({ length: 12 }, (_, i) => `the ${i}th thing he remembered about that long summer`).join(', ') + '.';
+  const out = splitSentences(long, 120);
+  assert.ok(out.length > 1);
+  for (const p of out) {
+    assert.ok(p.text.length <= 120);
+    assert.equal(long.slice(p.start, p.start + p.text.length), p.text);
+  }
+  assert.ok(out.slice(0, -1).every((p) => p.text.endsWith(',')), 'cut at commas');
+});
+
+test('chunk ranges point at their sentence in the paragraph', () => {
+  const para = 'First one here.   Second one here.';
+  const chunks = toChunks([para]);
+  assert.equal(chunks.length, 2);
+  for (const c of chunks) assert.equal(para.slice(c.start, c.end), c.text);
+  assert.equal(chunks[1].start, 18);
 });

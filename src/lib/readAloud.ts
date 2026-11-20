@@ -21,12 +21,20 @@ export type Chunk = {
   text: string;
   /** Where in the paragraph it starts, 0..1, to scroll inside long paragraphs. */
   at: number;
+  /** Its characters in the paragraph, [start, end), to highlight while it is read. */
+  start: number;
+  end: number;
 };
 
 /** Short enough that speed and voice changes kick in quickly, and far under Android's input limit. */
 export const CHUNK_MAX = 500;
+/** A sentence longer than this is read (and highlighted) a phrase at a time. */
+export const SENTENCE_MAX = 280;
 
-/** Splits a paragraph at sentence ends (or, failing that, spaces) into pieces of at most `max` characters. */
+/**
+ * Splits text at sentence ends (or, failing that, at a comma, semicolon or dash, then a space) into pieces of
+ * at most `max` characters.
+ */
 export function splitText(text: string, max = CHUNK_MAX): { text: string; start: number }[] {
   const out: { text: string; start: number }[] = [];
   let pos = 0;
@@ -47,6 +55,14 @@ export function splitText(text: string, max = CHUNK_MAX): { text: string; start:
       if (end >= max * 0.3) cut = end;
     }
     if (cut < 0) {
+      // A phrase break: the last ",", ";", ":" or dash followed by a space.
+      const phrase = /[,;:—–]+["'”’)\]]*(?=\s)/g;
+      for (let m = phrase.exec(window); m; m = phrase.exec(window)) {
+        const end = m.index + m[0].length;
+        if (end >= max * 0.3) cut = end;
+      }
+    }
+    if (cut < 0) {
       const space = window.lastIndexOf(' ');
       cut = space > max * 0.3 ? space : max;
     }
@@ -56,12 +72,53 @@ export function splitText(text: string, max = CHUNK_MAX): { text: string; start:
   return out.filter((p) => p.text.length > 0);
 }
 
-/** Turns paragraphs into speech chunks, skipping ones with nothing to say. */
-export function toChunks(paras: string[], max = CHUNK_MAX): Chunk[] {
+/** Words that end in a full stop without ending the sentence ("Mr. Smith"). */
+const ABBREVIATION = /(?:^|[\s("'“‘])(?:mr|mrs|ms|dr|st|jr|sr|prof|mt|vs|etc|no|vol|ch|e\.g|i\.e|[a-z])\.$/i;
+/** Pieces shorter than this ("Oh.", "Hm?") are read together with the next sentence. */
+const SHORT = 8;
+
+/**
+ * Splits a paragraph into sentences (and over-long sentences into phrases), each with where it starts in the
+ * paragraph. Abbreviations and initials don't end a sentence; very short sentences join the next one.
+ */
+export function splitSentences(text: string, max = SENTENCE_MAX): { text: string; start: number }[] {
+  const out: { text: string; start: number }[] = [];
+  const push = (from: number, to: number) => {
+    let a = from;
+    while (a < to && /\s/.test(text[a])) a++;
+    const piece = text.slice(a, to).trimEnd();
+    if (!piece) return;
+    if (piece.length <= max) out.push({ text: piece, start: a });
+    else for (const p of splitText(piece, max)) out.push({ text: p.text, start: a + p.start });
+  };
+  const re = /[.!?…]+["'”’)\]]*(?=\s|$)|[。！？]+/g;
+  let from = 0;
+  for (let m = re.exec(text); m; m = re.exec(text)) {
+    const end = m.index + m[0].length;
+    const piece = text.slice(from, end).trim();
+    if (m[0] === '.' && ABBREVIATION.test(piece)) continue;
+    if (piece.length < SHORT && end < text.length) continue;
+    push(from, end);
+    from = end;
+  }
+  push(from, text.length);
+  return out;
+}
+
+/** Turns paragraphs into speech chunks, a sentence each, skipping paragraphs with nothing to say. */
+export function toChunks(paras: string[], max = SENTENCE_MAX): Chunk[] {
   const chunks: Chunk[] = [];
   paras.forEach((p, para) => {
     if (!/[\p{L}\p{N}]/u.test(p)) return; // "* * *", empty lines
-    for (const piece of splitText(p, max)) chunks.push({ para, text: piece.text, at: p.length ? piece.start / p.length : 0 });
+    for (const piece of splitSentences(p, max)) {
+      chunks.push({
+        para,
+        text: piece.text,
+        at: p.length ? piece.start / p.length : 0,
+        start: piece.start,
+        end: piece.start + piece.text.length,
+      });
+    }
   });
   return chunks;
 }
