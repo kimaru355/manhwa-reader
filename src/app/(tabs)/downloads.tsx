@@ -7,6 +7,7 @@ import { EmptyState } from '../../components/EmptyState';
 import { SeriesGrid } from '../../components/SeriesGrid';
 import { useDownloads, type Job } from '../../lib/downloads';
 import { openSeries } from '../../lib/series';
+import { getSource } from '../../lib/sources';
 import { useTheme } from '../../lib/theme';
 import type { Series } from '../../lib/types';
 
@@ -57,7 +58,12 @@ export default function Downloads() {
     const active = g.jobs.find((j) => j.state === 'active');
     const failed = g.jobs.filter((j) => j.state === 'error').length;
     const on = started.includes(g.series.key);
-    if (active) return `Downloading · ${active.chapter.name} · ${active.done}/${active.total || '…'} pages`;
+    if (active) {
+      // A novel chapter is one file, so progress is counted in chapters left.
+      return getSource(g.series.source)?.kind === 'text'
+        ? `Downloading · ${active.chapter.name} · ${g.jobs.length} left`
+        : `Downloading · ${active.chapter.name} · ${active.done}/${active.total || '…'} pages`;
+    }
     if (failed && on) return `${failed} failed — ${g.jobs.find((j) => j.error)?.error}`;
     if (on) return 'Waiting…';
     return failed ? `${failed} failed · tap Start to retry` : 'Ready to start';

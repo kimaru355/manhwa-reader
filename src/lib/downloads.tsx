@@ -19,11 +19,15 @@ import {
 import { friendly } from './errors';
 import { loadAll, saveItems, saveQueue, saveStarted, setSaveErrorHandler } from './downloadStore';
 import { chapterDir, downloadFile, fetchPages, fileExists, removeDir, seriesDir } from './files';
-import { getSource, imageHeaders } from './sources';
+import { coverOf, getSource, imageHeaders } from './sources';
 import type { Chapter, DownloadedChapter, DownloadedSeries, Folder, Series } from './types';
 import { hash } from './util';
 
 const KEYS = { folder: 'downloadFolder1' } as const;
+
+/** A downloaded novel chapter: its paragraphs as a JSON array of strings. */
+export const TEXT_FILE = 'text.json';
+const TEXT_PAUSE_MS = 400;
 
 /** Where new downloads go: a folder the user picked, or the app's own storage (deleted on uninstall). */
 type FolderChoice = { mode: 'folder'; folder: Folder } | { mode: 'app' };
@@ -34,6 +38,15 @@ export const pageUris = (seriesKey: string, c: DownloadedChapter) => {
   const dir = chapterDir(seriesKey, c.id, true);
   return c.files.map((f) => `${dir}${f}`);
 };
+
+/** Reads a downloaded novel chapter. Throws if it is missing or unreadable. */
+export async function readDownloadedText(seriesKey: string, c: DownloadedChapter): Promise<string[]> {
+  const uri = pageUris(seriesKey, c)[c.files.indexOf(TEXT_FILE)];
+  if (!uri) throw new Error('Not a downloaded novel chapter');
+  const paras = JSON.parse(await FS.readAsStringAsync(uri)) as unknown;
+  if (!Array.isArray(paras) || !paras.length || !paras.every((p) => typeof p === 'string')) throw new Error('Unreadable chapter');
+  return paras as string[];
+}
 
 async function readJson<T>(key: string, fallback: T): Promise<T> {
   try {
@@ -111,6 +124,10 @@ type DownloadsContext = {
   /** Moves a title earlier (-1) or later (1) in the download order. */
   moveSeries: (seriesKey: string, direction: -1 | 1) => void;
   removeChapter: (seriesKey: string, chapterId: string) => void;
+  /** Deletes several downloaded chapters of a title at once. */
+  removeChapters: (seriesKey: string, chapterIds: string[]) => void;
+  /** Takes several chapters of a title off the download list. */
+  cancelChapters: (seriesKey: string, chapterIds: string[]) => void;
   removeSeries: (seriesKey: string) => void;
   /** The folder new downloads are saved in; null means the app's own storage. */
   folder: Folder | null;
@@ -224,13 +241,14 @@ export function DownloadsProvider({ children }: { children: ReactNode }) {
   const saveCover = async (series: Series, folder: Folder | null) => {
     // A cover already in the app's storage is moved into the folder along with the chapters.
     const existing = itemsRef.current.find((i) => i.series.key === series.key)?.cover;
-    if (existing || !series.cover) return existing;
+    const url = coverOf(series);
+    if (existing || !url) return existing;
     try {
       const dir = folder ? `${STAGE}cover-${hash(series.key)}/` : seriesDir(series.key);
       await FS.makeDirectoryAsync(dir, { intermediates: true }).catch(() => {});
-      const ext = series.cover.split(/[?#]/)[0].match(/\.(jpe?g|png|webp)$/i)?.[1] ?? 'jpg';
+      const ext = url.split(/[?#]/)[0].match(/\.(jpe?g|png|webp)$/i)?.[1] ?? 'jpg';
       const dest = `${dir}cover.${ext}`;
-      await downloadFile(series.cover, dest, imageHeaders(series));
+      await downloadFile(url, dest, imageHeaders(series));
       if (!folder) return dest;
       try {
         return (await saveCoverToFolder(folder.uri, series, dest)).uri;
@@ -250,15 +268,29 @@ export function DownloadsProvider({ children }: { children: ReactNode }) {
     // Stops at the next page when the title is paused or the chapter removed; files already saved are kept.
     const shouldStop = () => removed.current.has(k) || !startedRef.current.includes(job.series.key);
     try {
-      const urls = await source.pages(job.series, job.chapter);
-      if (shouldStop()) throw new Error('Cancelled');
       // With a download folder, pages are gathered in the app's cache and copied over once they are all in.
       const folder = folderOf();
       const dir = folder ? stageDir(job.series.key, job.chapter.id) : chapterDir(job.series.key, job.chapter.id, true);
-      const files = await fetchPages(urls, dir, source.imageHeaders, (done, total) => {
-        patch(k, { done, total });
-        updateBackground(`${job.series.title} · ${job.chapter.name} · ${done}/${total} pages`, done, total);
-      }, shouldStop);
+      let files: string[];
+      if (source.kind === 'text' && source.text) {
+        // A novel chapter is one file holding its paragraphs.
+        updateBackground(`${job.series.title} · ${job.chapter.name}`, 0, 1);
+        const paras = await source.text(job.series, job.chapter);
+        if (shouldStop()) throw new Error('Cancelled');
+        await FS.makeDirectoryAsync(dir, { intermediates: true }).catch(() => {});
+        await FS.writeAsStringAsync(`${dir}${TEXT_FILE}`, JSON.stringify(paras));
+        files = [TEXT_FILE];
+        patch(k, { done: 1, total: 1 });
+        // Hundreds of chapters back to back would get the reader's address blocked by the site for a while.
+        await new Promise((r) => setTimeout(r, TEXT_PAUSE_MS));
+      } else {
+        const urls = await source.pages(job.series, job.chapter);
+        if (shouldStop()) throw new Error('Cancelled');
+        files = await fetchPages(urls, dir, source.imageHeaders, (done, total) => {
+          patch(k, { done, total });
+          updateBackground(`${job.series.title} · ${job.chapter.name} · ${done}/${total} pages`, done, total);
+        }, shouldStop);
+      }
       let saved: DownloadedChapter = { ...job.chapter, files, ts: Date.now() };
       let folderDir: string | undefined;
       if (folder) {
@@ -465,23 +497,51 @@ export function DownloadsProvider({ children }: { children: ReactNode }) {
     [updateQueue],
   );
 
-  const removeChapter = useCallback(
-    (seriesKey: string, chapterId: string) => {
+  /** Deletes some downloaded chapters of a title (and the title, once none are left). */
+  const removeChapters = useCallback(
+    (seriesKey: string, chapterIds: string[]) => {
+      const ids = new Set(chapterIds);
       const item = itemsRef.current.find((i) => i.series.key === seriesKey);
-      const chapter = item?.chapters.find((c) => c.id === chapterId);
-      removeDir(chapter?.dir ?? chapterDir(seriesKey, chapterId, true));
+      if (!item) return;
+      for (const c of item.chapters) if (ids.has(c.id)) removeDir(c.dir ?? chapterDir(seriesKey, c.id, true));
       const next = itemsRef.current
-        .map((i) => (i.series.key === seriesKey ? { ...i, chapters: i.chapters.filter((c) => c.id !== chapterId) } : i))
+        .map((i) => (i.series.key === seriesKey ? { ...i, chapters: i.chapters.filter((c) => !ids.has(c.id)) } : i))
         .filter((i) => i.chapters.length > 0);
       const left = next.some((i) => i.series.key === seriesKey);
       if (!left) {
         removeDir(seriesDir(seriesKey));
-        if (item?.dir) removeDir(item.dir);
+        if (item.dir) removeDir(item.dir);
       }
       commitItems(next);
-      if (left && item?.dir) refreshManifest(seriesKey);
+      if (left && item.dir) refreshManifest(seriesKey);
     },
     [commitItems, refreshManifest],
+  );
+
+  const removeChapter = useCallback(
+    (seriesKey: string, chapterId: string) => removeChapters(seriesKey, [chapterId]),
+    [removeChapters],
+  );
+
+  /** Takes chapters of a title off the download list (deleting what was partly downloaded). */
+  const cancelChapters = useCallback(
+    (seriesKey: string, chapterIds: string[]) => {
+      const keys = new Set(chapterIds.map((id) => jobKey(seriesKey, id)));
+      const drop = new Set<string>();
+      for (const job of queueRef.current) {
+        const k = keyOf(job);
+        if (!keys.has(k)) continue;
+        // A running chapter stops at its next page and removes itself.
+        if (job.state === 'active') removed.current.add(k);
+        else {
+          drop.add(k);
+          removeDir(chapterDir(job.series.key, job.chapter.id, true));
+          removeDir(stageDir(job.series.key, job.chapter.id));
+        }
+      }
+      if (drop.size) updateQueue((q) => q.filter((j) => !drop.has(keyOf(j))));
+    },
+    [updateQueue],
   );
 
   const removeSeries = useCallback(
@@ -611,6 +671,8 @@ export function DownloadsProvider({ children }: { children: ReactNode }) {
       retry,
       moveSeries,
       removeChapter,
+      removeChapters,
+      cancelChapters,
       removeSeries,
       folder: choice?.mode === 'folder' ? choice.folder : null,
       folderDecided: !folderSupported || !!choice,
@@ -632,6 +694,8 @@ export function DownloadsProvider({ children }: { children: ReactNode }) {
     retry,
     moveSeries,
     removeChapter,
+    removeChapters,
+    cancelChapters,
     removeSeries,
     choice,
     folderLost,

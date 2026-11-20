@@ -15,7 +15,7 @@ function parseList(html: string): Series[] {
       source: 'novelbin',
       id: m[2],
       title: decodeHtml(m[3]),
-      cover: m[1] || undefined,
+      cover: m[1] ? decodeHtml(m[1]) : undefined,
       category: 'novel',
     });
   }

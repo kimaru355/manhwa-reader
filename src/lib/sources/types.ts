@@ -5,7 +5,7 @@ export type Page<T> = { items: T[]; hasMore: boolean };
 export type Source = {
   id: SourceId;
   name: string;
-  /** `text` sources are novels: chapters are read as text, not images, and cannot be downloaded. */
+  /** `text` sources are novels: chapters are read (and downloaded) as text, not images. */
   kind?: 'text';
   /** Headers needed to fetch images (some hosts reject requests without a Referer). */
   imageHeaders: Record<string, string>;

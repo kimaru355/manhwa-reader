@@ -49,3 +49,7 @@ keystore/
 # The website has its own repo (kimaru355/manhwa-reader-web) and lives in this folder
 /site/
 *.keystore
+
+# Gradle output of the app's own native modules
+/modules/*/android/build/
+/modules/*/android/.gradle/

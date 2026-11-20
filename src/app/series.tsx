@@ -17,6 +17,7 @@ import {
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
+import { ChapterRangeSheet, type RangeMode } from '../components/ChapterRangeSheet';
 import { Cover } from '../components/Cover';
 import { Comments } from '../components/Comments';
 import { RecommendSheet } from '../components/RecommendSheet';
@@ -30,7 +31,7 @@ import { TIER_LABEL, useRecs } from '../lib/recs';
 import { openReader, parseRef, useChapters, useCommunityBookmarks } from '../lib/series';
 import { getSource } from '../lib/sources';
 import { useTheme } from '../lib/theme';
-import type { Bookmark } from '../lib/types';
+import type { Bookmark, Chapter } from '../lib/types';
 
 /** Chapters drawn in the chapter window at first, and added each time its end comes near. */
 const WINDOW_STEP = 60;
@@ -46,6 +47,7 @@ export default function SeriesDetail() {
   const { chapters, loading, error, reload, offline } = useChapters(series);
   const [newestFirst, setNewestFirst] = useState(false);
   const [recommendOpen, setRecommendOpen] = useState(false);
+  const [rangeMode, setRangeMode] = useState<RangeMode | null>(null);
   /** How many chapters the window draws, for the title and order it was counted for (anything else starts over). */
   const [drawn, setDrawn] = useState({ key: '', count: WINDOW_STEP });
   const account = useAccount();
@@ -143,7 +145,7 @@ export default function SeriesDetail() {
               <Ionicons name="time-outline" size={22} color={t.sub} />
             )}
           </Pressable>
-        ) : textOnly ? null : (
+        ) : (
           <Pressable hitSlop={10} onPress={() => addToDownloads([c])}>
             <Ionicons name="download-outline" size={22} color={t.sub} />
           </Pressable>
@@ -172,6 +174,38 @@ export default function SeriesDetail() {
     Alert.alert(`Download all ${pending.length} chapter${pending.length === 1 ? '' : 's'}?`, undefined, [
       { text: 'Cancel', style: 'cancel' },
       { text: 'Yes', onPress: () => addToDownloads(pending) },
+    ]);
+  };
+
+  /** Chapters of a range that a download or a delete would change. */
+  const rangeCount = (list: Chapter[]) =>
+    rangeMode === 'delete'
+      ? list.filter((c) => dl.getChapter(series.key, c.id) || dl.getJob(series.key, c.id)).length
+      : list.filter((c) => !dl.getChapter(series.key, c.id) && !dl.getJob(series.key, c.id)).length;
+
+  const confirmRange = (mode: RangeMode, list: Chapter[]) => {
+    if (mode === 'download') {
+      addToDownloads(list);
+      return;
+    }
+    const saved = list.filter((c) => dl.getChapter(series.key, c.id)).map((c) => c.id);
+    const queued = list.filter((c) => dl.getJob(series.key, c.id)).map((c) => c.id);
+    const what = [
+      saved.length ? `${saved.length} downloaded chapter${saved.length === 1 ? '' : 's'}` : '',
+      queued.length ? `${queued.length} waiting to download` : '',
+    ]
+      .filter(Boolean)
+      .join(' and ');
+    Alert.alert(`Delete ${what}?`, `“${list[0].name}” to “${list[list.length - 1].name}”. This can’t be undone.`, [
+      { text: 'Cancel', style: 'cancel' },
+      {
+        text: 'Delete',
+        style: 'destructive',
+        onPress: () => {
+          if (queued.length) dl.cancelChapters(series.key, queued);
+          if (saved.length) dl.removeChapters(series.key, saved);
+        },
+      },
     ]);
   };
 
@@ -235,40 +269,59 @@ export default function SeriesDetail() {
         </Text>
       </Pressable>
 
-      {chapters.length && !textOnly ? (
-        <View style={styles.actions}>
-          <Pressable
-            disabled={!pending.length}
-            onPress={downloadAll}
-            style={[styles.action, { borderColor: t.border, opacity: pending.length ? 1 : 0.5 }]}
-          >
-            <Ionicons name="download-outline" size={18} color={t.text} />
-            <Text style={{ color: t.text }}>{pending.length ? 'Download all' : 'All downloaded'}</Text>
-          </Pressable>
+      {chapters.length ? (
+        <View style={styles.actionRows}>
+          <View style={styles.actions}>
+            <Pressable
+              disabled={!pending.length}
+              onPress={downloadAll}
+              style={[styles.action, { borderColor: t.border, opacity: pending.length ? 1 : 0.5 }]}
+            >
+              <Ionicons name="download-outline" size={18} color={t.text} />
+              <Text style={{ color: t.text }}>{pending.length ? 'Download all' : 'All downloaded'}</Text>
+            </Pressable>
+            <Pressable
+              disabled={!pending.length}
+              onPress={() => setRangeMode('download')}
+              style={[styles.action, { borderColor: t.border, opacity: pending.length ? 1 : 0.5 }]}
+            >
+              <Ionicons name="list-outline" size={18} color={t.text} />
+              <Text style={{ color: t.text }}>Download range</Text>
+            </Pressable>
+          </View>
           {waiting.length ? (
-            <Pressable
-              onPress={() => (running ? dl.stop(series.key) : dl.start(series.key))}
-              style={[styles.action, { borderColor: t.accent }]}
-            >
-              <Ionicons name={running ? 'pause' : 'play'} size={18} color={t.accent} />
-              <Text style={{ color: t.accent }}>
-                {running ? 'Pause' : 'Start'} ({waiting.length})
-              </Text>
-            </Pressable>
+            <View style={styles.actions}>
+              <Pressable
+                onPress={() => (running ? dl.stop(series.key) : dl.start(series.key))}
+                style={[styles.action, { borderColor: t.accent }]}
+              >
+                <Ionicons name={running ? 'pause' : 'play'} size={18} color={t.accent} />
+                <Text style={{ color: t.accent }}>
+                  {running ? 'Pause downloads' : 'Start downloads'} ({waiting.length})
+                </Text>
+              </Pressable>
+            </View>
           ) : null}
-          {savedCount ? (
-            <Pressable
-              onPress={() =>
-                Alert.alert('Delete all downloads?', `Removes ${savedCount} saved chapters from this phone.`, [
-                  { text: 'Cancel', style: 'cancel' },
-                  { text: 'Delete', style: 'destructive', onPress: () => dl.removeSeries(series.key) },
-                ])
-              }
-              style={[styles.action, { borderColor: t.border }]}
-            >
-              <Ionicons name="trash-outline" size={18} color={t.danger} />
-              <Text style={{ color: t.danger }}>Delete downloads</Text>
-            </Pressable>
+          {savedCount || waiting.length ? (
+            <View style={styles.actions}>
+              <Pressable onPress={() => setRangeMode('delete')} style={[styles.action, { borderColor: t.border }]}>
+                <Ionicons name="cut-outline" size={18} color={t.danger} />
+                <Text style={{ color: t.danger }}>Delete range</Text>
+              </Pressable>
+              <Pressable
+                disabled={!savedCount}
+                onPress={() =>
+                  Alert.alert('Delete all downloads?', `Removes ${savedCount} saved chapter${savedCount === 1 ? '' : 's'} from this phone.`, [
+                    { text: 'Cancel', style: 'cancel' },
+                    { text: 'Delete', style: 'destructive', onPress: () => dl.removeSeries(series.key) },
+                  ])
+                }
+                style={[styles.action, { borderColor: t.border, opacity: savedCount ? 1 : 0.5 }]}
+              >
+                <Ionicons name="trash-outline" size={18} color={t.danger} />
+                <Text style={{ color: t.danger }}>Delete all</Text>
+              </Pressable>
+            </View>
           ) : null}
         </View>
       ) : null}
@@ -364,6 +417,14 @@ export default function SeriesDetail() {
         }
       />
       <RecommendSheet series={series} visible={recommendOpen} onClose={() => setRecommendOpen(false)} />
+      <ChapterRangeSheet
+        mode={rangeMode}
+        onClose={() => setRangeMode(null)}
+        chapters={chapters}
+        current={resumeIdx}
+        count={rangeCount}
+        onConfirm={confirmRange}
+      />
     </View>
   );
 }
@@ -396,7 +457,8 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   ctaText: { color: '#fff', fontSize: 16, fontWeight: '600' },
-  actions: { flexDirection: 'row', gap: 10, marginHorizontal: 16, marginTop: 10 },
+  actionRows: { gap: 10, marginTop: 10 },
+  actions: { flexDirection: 'row', gap: 10, marginHorizontal: 16 },
   action: {
     flex: 1,
     flexDirection: 'row',

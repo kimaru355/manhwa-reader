@@ -1,23 +1,26 @@
 import { Ionicons } from '@expo/vector-icons';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { router, useLocalSearchParams } from 'expo-router';
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { ActivityIndicator, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { EmptyState } from '../components/EmptyState';
+import { readDownloadedText, useDownloads } from '../lib/downloads';
 import { friendly, toastError } from '../lib/errors';
 import { useLibrary } from '../lib/library';
 import { Comments } from '../components/Comments';
+import { ReadAloudBar } from '../components/ReadAloudBar';
 import { parseRef, useChapters } from '../lib/series';
 import { getSource } from '../lib/sources';
 import { useTheme } from '../lib/theme';
+import { useReadAloud } from '../lib/useReadAloud';
 
 const SIZE_KEY = 'novelFontSize1';
 const MIN = 14;
 const MAX = 30;
 
-/** Reads a novel chapter as text, with previous/next chapter and a text size setting. */
+/** Reads a novel chapter as text, with previous/next chapter, a text size setting and read aloud. */
 export default function Novel() {
   const t = useTheme();
   const insets = useSafeAreaInsets();
@@ -25,17 +28,65 @@ export default function Novel() {
   const series = parseRef(params.ref);
   const { chapters, error: listError, offline: listPending, reload } = useChapters(series);
   const { saveProgress } = useLibrary();
+  const { getChapter } = useDownloads();
   const [chapterId, setChapterId] = useState(params.ch ?? '');
   const [paras, setParas] = useState<string[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [attempt, setAttempt] = useState(0);
   const [size, setSize] = useState(18);
   const scroll = useRef<React.ComponentRef<typeof ScrollView>>(null);
+  const [aloudOpen, setAloudOpen] = useState(false);
+  // Where each paragraph sits in the scroll content, and the view, for following along.
+  const paraBox = useRef<{ y: number; h: number }[]>([]);
+  const scrollY = useRef(0);
+  const viewH = useRef(0);
 
   const index = chapters.findIndex((c) => c.id === chapterId);
   const chapter = index >= 0 ? chapters[index] : undefined;
   // The chapter list failed to load, or loaded without this chapter: say so instead of loading forever.
   const missing = !chapter && (!!listError || !listPending);
+
+  const nextChapter = index >= 0 ? chapters[index + 1] : undefined;
+  const aloud = useReadAloud({
+    paras,
+    chapterName: chapter?.name ?? '',
+    seriesTitle: series?.title ?? '',
+    // Carry on into the next chapter when this one has been read to the end.
+    onChapterEnd: useCallback(() => {
+      if (!nextChapter) return false;
+      setChapterId(nextChapter.id);
+      return true;
+    }, [nextChapter]),
+  });
+
+  // Keep the part being read in view: scroll when it drifts out of the upper part of the screen.
+  const following = aloud.status === 'playing' || aloud.status === 'paused';
+  useEffect(() => {
+    if (!following || aloud.para === undefined) return;
+    const box = paraBox.current[aloud.para];
+    if (!box || !viewH.current) return;
+    const y = box.y + box.h * aloud.at;
+    const top = scrollY.current;
+    if (y < top + viewH.current * 0.08 || y > top + viewH.current * 0.6) {
+      scroll.current?.scrollTo({ y: Math.max(0, y - viewH.current * 0.2), animated: true });
+    }
+  }, [following, aloud.para, aloud.at]);
+
+  /** The first paragraph showing at the top of the screen, to start listening from there. */
+  const firstVisible = () => {
+    const i = paraBox.current.findIndex((b) => b && b.y + b.h > scrollY.current + 4);
+    return i < 0 ? 0 : i;
+  };
+
+  const openAloud = () => {
+    if (aloudOpen) {
+      aloud.stop();
+      setAloudOpen(false);
+      return;
+    }
+    setAloudOpen(true);
+    if (aloud.canRead) aloud.play(firstVisible());
+  };
 
   useEffect(() => {
     AsyncStorage.getItem(SIZE_KEY)
@@ -56,14 +107,18 @@ export default function Novel() {
   useEffect(() => {
     const source = series ? getSource(series.source) : undefined;
     if (!series || !source?.text || !chapter) return;
+    const text = source.text;
     let alive = true;
     // eslint-disable-next-line react-hooks/set-state-in-effect
     setParas(null);
     setError(null);
-    source
-      .text(series, chapter)
+    // A downloaded chapter is read from the phone; if its copy can't be read, it is fetched online.
+    const saved = getChapter(series.key, chapter.id);
+    const online = () => text(series, chapter);
+    (saved ? readDownloadedText(series.key, saved).catch(online) : online())
       .then((p) => {
         if (!alive) return;
+        paraBox.current = [];
         setParas(p);
         scroll.current?.scrollTo({ y: 0, animated: false });
         saveProgress({ series, chapterId: chapter.id, chapterName: chapter.name, page: 1, total: 1 });
@@ -113,6 +168,9 @@ export default function Novel() {
         <Text numberOfLines={1} style={[styles.barTitle, { color: t.text }]}>
           {chapter?.name ?? series.title}
         </Text>
+        <Pressable accessibilityRole="button" accessibilityLabel="Read aloud" hitSlop={10} onPress={openAloud}>
+          <Ionicons name={aloudOpen ? 'headset' : 'headset-outline'} size={23} color={aloudOpen ? t.accent : t.sub} />
+        </Pressable>
         <Pressable hitSlop={10} onPress={() => resize(-2)}>
           <Ionicons name="remove-circle-outline" size={24} color={t.sub} />
         </Pressable>
@@ -136,9 +194,32 @@ export default function Novel() {
           <ActivityIndicator color={t.accent} size="large" />
         </View>
       ) : (
-        <ScrollView ref={scroll} contentContainerStyle={[styles.body, { paddingBottom: insets.bottom + 24 }]}>
+        <ScrollView
+          ref={scroll}
+          contentContainerStyle={[styles.body, { paddingBottom: (aloudOpen ? 0 : insets.bottom) + 24 }]}
+          scrollEventThrottle={100}
+          onScroll={(e) => {
+            scrollY.current = e.nativeEvent.contentOffset.y;
+          }}
+          onLayout={(e) => {
+            viewH.current = e.nativeEvent.layout.height;
+          }}
+        >
           {paras.map((p, i) => (
-            <Text key={i} selectable style={{ color: t.text, fontSize: size, lineHeight: size * 1.6, marginBottom: size * 0.9 }}>
+            <Text
+              key={i}
+              selectable
+              onLayout={(e) => {
+                paraBox.current[i] = { y: e.nativeEvent.layout.y, h: e.nativeEvent.layout.height };
+              }}
+              // While read aloud is open, tapping a paragraph reads from there.
+              onPress={aloudOpen ? () => aloud.play(i) : undefined}
+              style={[
+                styles.para,
+                { color: t.text, fontSize: size, lineHeight: size * 1.6, marginBottom: size * 0.9 },
+                aloudOpen && aloud.para === i && { backgroundColor: t.card },
+              ]}
+            >
               {p}
             </Text>
           ))}
@@ -148,6 +229,29 @@ export default function Novel() {
           ) : null}
         </ScrollView>
       )}
+
+      {aloudOpen ? (
+        <ReadAloudBar
+          status={aloud.status}
+          para={aloud.para}
+          total={paras?.length ?? 0}
+          canRead={aloud.canRead}
+          onPlay={() => aloud.play()}
+          onPause={aloud.pause}
+          onStop={aloud.stop}
+          onSkip={aloud.skip}
+          onClose={() => {
+            aloud.stop();
+            setAloudOpen(false);
+          }}
+          speed={aloud.speed}
+          onSpeed={aloud.setSpeed}
+          voices={aloud.voices}
+          voice={aloud.voice}
+          onVoice={aloud.setVoice}
+          bottomInset={insets.bottom}
+        />
+      ) : null}
     </View>
   );
 }
@@ -158,6 +262,8 @@ const styles = StyleSheet.create({
   bar: { flexDirection: 'row', alignItems: 'center', gap: 14, paddingHorizontal: 14, paddingVertical: 10, borderBottomWidth: StyleSheet.hairlineWidth },
   barTitle: { flex: 1, fontSize: 16, fontWeight: '600' },
   body: { padding: 18 },
+  // Same padding with or without the read-aloud highlight, so text doesn't shift.
+  para: { marginHorizontal: -6, paddingHorizontal: 6, borderRadius: 6 },
   nav: { flexDirection: 'row', justifyContent: 'space-between', marginTop: 12 },
   navBtn: { flexDirection: 'row', alignItems: 'center', gap: 4, paddingHorizontal: 16, paddingVertical: 10, borderRadius: 10, borderWidth: 1 },
 });

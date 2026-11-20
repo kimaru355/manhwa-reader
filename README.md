@@ -34,6 +34,9 @@ Native modules (PDF rendering, thumbnails) mean this can't run in Expo Go.
 
 ## Notes
 
+- `modules/read-aloud-media` is the app's own native module (Expo autolinks `./modules`): the novel reader's read-aloud
+  media notification (previous / play-pause / next by chunk), run as a "media playback" foreground service so listening
+  goes on with the screen off. Builds made before 1.6.0 don't have it; read aloud then works without the notification.
 - Each chapter is copied into app cache and opened from there (the next one is prefetched; cache is capped at 8 chapters).
 - Covers are page 1 of the first chapter, rendered once and stored in app storage.
 - Folder access uses Android's Storage Access Framework, so no storage permission prompt is needed.

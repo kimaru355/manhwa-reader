@@ -1,3 +1,4 @@
+import { coverFor } from '../covers';
 import type { Category, Series, SourceId } from '../types';
 import { hentai20 } from './hentai20';
 import { mangadex } from './mangadex';
@@ -25,3 +26,6 @@ export const imageHeaders = (s: Pick<Series, 'source'>): Record<string, string> 
   getSource(s.source)?.imageHeaders ?? {};
 
 export type { Source };
+
+/** Where to load a title's cover from (some sources' own image hosts are gone; see covers.ts). */
+export const coverOf = (s: Pick<Series, 'source' | 'id' | 'cover'>) => coverFor(s);
