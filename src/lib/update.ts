@@ -10,6 +10,14 @@ const VERSION_URL = `${API_BASE_URL}/version.json`;
 
 export type UpdateInfo = { versionCode: number; versionName: string; notes?: string };
 
+// Published APK names. Keep these in step with scripts/publish-apks.mjs and site/lib/apk.ts.
+const standardApk = (v: string) => `manhwa-reader-v${v}.apk`;
+const legacyApk = (v: string) => `manhwa-reader-older-android-v${v}.apk`;
+
+/** Where a release's APK is: the standard (64-bit) build, or the one for phones that only run 32-bit apps. */
+export const apkUrl = (info: UpdateInfo, is64Bit: boolean) =>
+  `${API_BASE_URL}/${(is64Bit ? standardApk : legacyApk)(info.versionName)}`;
+
 /** Build number of the installed app (Android versionCode). */
 export const installedBuild = () => Number(Application.nativeBuildVersion) || 0;
 export const installedName = () => Application.nativeApplicationVersion ?? '';
@@ -35,5 +43,5 @@ export async function checkForUpdate(): Promise<UpdateInfo | null> {
   }
 }
 
-/** Opens the download page in the browser; the person picks and installs the new build from there. */
+/** Opens the download page in the browser (builds without the app's installer module update from there). */
 export const openDownload = () => Linking.openURL(DOWNLOAD_URL).catch(() => {});

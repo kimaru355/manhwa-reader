@@ -5,7 +5,9 @@ import { ActivityIndicator, Alert, Pressable, ScrollView, StyleSheet, Text, Text
 
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
+import { AppUpdateCard } from '../components/AppUpdateCard';
 import { useAccount } from '../lib/account';
+import { downloadAppUpdate, installsUpdates, useAppUpdate } from '../lib/appUpdate';
 import { pickImportFile } from '../lib/backup';
 import { folderSupported } from '../lib/downloadFolder';
 import { useDownloads } from '../lib/downloads';
@@ -40,6 +42,7 @@ export default function Settings() {
   const lib = useLibrary();
   const recs = useRecs();
   const updater = useUpdater();
+  const appUpdate = useAppUpdate();
   const account = useAccount();
   const dl = useDownloads();
   const [draft, setRecsUrl] = useState<string | null>(null);
@@ -244,7 +247,14 @@ export default function Settings() {
                 </Text>
               </View>
             </View>
-            {u.kind === 'available' ? (
+            {u.kind === 'available' && installsUpdates && appUpdate ? (
+              <AppUpdateCard />
+            ) : u.kind === 'available' && installsUpdates ? (
+              <Pressable onPress={() => downloadAppUpdate(u.info)} style={[styles.primary, { backgroundColor: t.accent }]}>
+                <Ionicons name="download-outline" size={18} color="#fff" />
+                <Text style={styles.primaryText}>Download update</Text>
+              </Pressable>
+            ) : u.kind === 'available' ? (
               <Pressable onPress={openDownload} style={[styles.primary, { backgroundColor: t.accent }]}>
                 <Ionicons name="open-outline" size={18} color="#fff" />
                 <Text style={styles.primaryText}>Get it from the website</Text>

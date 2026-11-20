@@ -2,9 +2,11 @@ import { Ionicons } from '@expo/vector-icons';
 import { useMemo } from 'react';
 import { Alert, Pressable, StyleSheet, Text, View } from 'react-native';
 
+import { AppUpdateCard } from '../../components/AppUpdateCard';
 import { Cover } from '../../components/Cover';
 import { EmptyState } from '../../components/EmptyState';
 import { SeriesGrid } from '../../components/SeriesGrid';
+import { useAppUpdate } from '../../lib/appUpdate';
 import { useDownloads, type Job } from '../../lib/downloads';
 import { openSeries } from '../../lib/series';
 import { getSource } from '../../lib/sources';
@@ -16,6 +18,7 @@ type Group = { series: Series; jobs: Job[] };
 export default function Downloads() {
   const t = useTheme();
   const { items, queue, started, start, stop, cancelSeries, removeSeries, moveSeries } = useDownloads();
+  const appUpdate = useAppUpdate();
 
   const groups = useMemo(() => {
     const map = new Map<string, Group>();
@@ -27,15 +30,15 @@ export default function Downloads() {
     return [...map.values()];
   }, [queue]);
 
-  if (items.length === 0 && groups.length === 0) {
-    return (
-      <EmptyState
-        icon="download-outline"
-        title="Nothing downloaded"
-        message="Add chapters to download from a title's page, then start them here."
-      />
-    );
-  }
+  const empty = (
+    <EmptyState
+      icon="download-outline"
+      title="Nothing downloaded"
+      message="Add chapters to download from a title's page, then start them here."
+    />
+  );
+
+  if (items.length === 0 && groups.length === 0 && !appUpdate) return empty;
 
   const anyRunning = groups.some((g) => started.includes(g.series.key));
 
@@ -69,18 +72,22 @@ export default function Downloads() {
     return failed ? `${failed} failed · tap Start to retry` : 'Ready to start';
   };
 
-  const header = groups.length ? (
+  // The app's own update stays first, so it's easy to find and install.
+  const header = (
     <View style={styles.queue}>
-      <View style={styles.queueHead}>
-        <Text style={[styles.queueTitle, { color: t.text }]}>To download</Text>
-        <Pressable
-          onPress={() => (anyRunning ? stop() : start())}
-          style={[styles.bigBtn, { backgroundColor: anyRunning ? t.card : t.accent }]}
-        >
-          <Ionicons name={anyRunning ? 'pause' : 'play'} size={16} color={anyRunning ? t.text : '#fff'} />
-          <Text style={{ color: anyRunning ? t.text : '#fff', fontWeight: '600' }}>{anyRunning ? 'Pause all' : 'Start all'}</Text>
-        </Pressable>
-      </View>
+      <AppUpdateCard />
+      {groups.length ? (
+        <View style={styles.queueHead}>
+          <Text style={[styles.queueTitle, { color: t.text }]}>To download</Text>
+          <Pressable
+            onPress={() => (anyRunning ? stop() : start())}
+            style={[styles.bigBtn, { backgroundColor: anyRunning ? t.card : t.accent }]}
+          >
+            <Ionicons name={anyRunning ? 'pause' : 'play'} size={16} color={anyRunning ? t.text : '#fff'} />
+            <Text style={{ color: anyRunning ? t.text : '#fff', fontWeight: '600' }}>{anyRunning ? 'Pause all' : 'Start all'}</Text>
+          </Pressable>
+        </View>
+      ) : null}
 
       {groups.map((g, gi) => {
         const on = started.includes(g.series.key);
@@ -136,14 +143,17 @@ export default function Downloads() {
         );
       })}
 
-      {items.length ? <Text style={[styles.queueTitle, { color: t.text, marginTop: 16 }]}>Downloaded</Text> : null}
+      {items.length && (groups.length || appUpdate) ? (
+        <Text style={[styles.queueTitle, { color: t.text, marginTop: 16 }]}>Downloaded</Text>
+      ) : null}
     </View>
-  ) : undefined;
+  );
 
   return (
     <SeriesGrid
       data={items.map((i) => i.series)}
       header={header}
+      empty={groups.length ? undefined : empty}
       sub={(s) => {
         const n = items.find((i) => i.series.key === s.key)?.chapters.length ?? 0;
         return `${n} chapter${n === 1 ? '' : 's'} saved`;

@@ -15,7 +15,7 @@ import { join } from 'node:path';
 
 import { withEntry } from './changelog.mjs';
 
-// Keep these in step with site/lib/apk.ts.
+// Keep these in step with site/lib/apk.ts and src/lib/update.ts (the app downloads its updates by these names).
 export const standardApk = (v) => `manhwa-reader-v${v}.apk`;
 export const legacyApk = (v) => `manhwa-reader-older-android-v${v}.apk`;
 

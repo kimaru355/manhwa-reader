@@ -25,8 +25,12 @@ new key. Without `keystore.properties` a build falls back to the debug key.
    writes `site/public/version.json` (versionCode, versionName, and the changes joined as its notes), adds the
    version at the top of `site/lib/changelog.ts` (or replaces its entry when publishing the same version again),
    and removes older published APKs.
-5. Commit and deploy the site. The app's update check reads `version.json`, and "Get it" opens the site's
-   `/download` page, which offers both APKs.
+5. Commit and deploy the site. The app's update check reads `version.json` when it opens. From 1.9.0 the app
+   downloads the APK its phone needs itself (`manhwa-reader-v<version>.apk`, or the `older-android` one on
+   phones that only run 32-bit apps), shows it at the top of the Downloads tab and hands it to Android's package
+   installer; the file is deleted when the new version first opens. So the published names above must not change
+   (`src/lib/update.ts` builds the download address from them). Builds before 1.9.0 open the site's `/download`
+   page instead.
 
 Both APKs have the same versionCode and signing key, so either one installs over any earlier version. Apps older
 than 1.4.0 update from `/manhwa-reader.apk`; once that file is gone the address leads to `/download`.

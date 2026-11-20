@@ -1,0 +1,18 @@
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+  <!-- Lets the app hand a downloaded update to the system package installer. -->
+  <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
+
+  <application>
+    <!-- Shares downloaded updates (files/updates/) with the package installer. Its own class, so it can't clash
+         with other libraries' FileProviders in the merged manifest. -->
+    <provider
+      android:name="expo.modules.appinstaller.AppInstallerFileProvider"
+      android:authorities="${applicationId}.appinstaller"
+      android:exported="false"
+      android:grantUriPermissions="true">
+      <meta-data
+        android:name="android.support.FILE_PROVIDER_PATHS"
+        android:resource="@xml/app_installer_paths" />
+    </provider>
+  </application>
+</manifest>
