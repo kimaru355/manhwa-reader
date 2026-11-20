@@ -17,18 +17,13 @@ import {
   writeManifest,
 } from './downloadFolder';
 import { friendly } from './errors';
+import { loadAll, saveItems, saveQueue, saveStarted, setSaveErrorHandler } from './downloadStore';
 import { chapterDir, downloadFile, fetchPages, fileExists, removeDir, seriesDir } from './files';
 import { getSource, imageHeaders } from './sources';
 import type { Chapter, DownloadedChapter, DownloadedSeries, Folder, Series } from './types';
 import { hash } from './util';
 
-const KEYS = {
-  legacyItems: 'downloads1',
-  index: 'downloads2',
-  queue: 'downloadQueue1',
-  started: 'downloadStarted1',
-  folder: 'downloadFolder1',
-} as const;
+const KEYS = { folder: 'downloadFolder1' } as const;
 
 /** Where new downloads go: a folder the user picked, or the app's own storage (deleted on uninstall). */
 type FolderChoice = { mode: 'folder'; folder: Folder } | { mode: 'app' };
@@ -40,18 +35,6 @@ export const pageUris = (seriesKey: string, c: DownloadedChapter) => {
   return c.files.map((f) => `${dir}${f}`);
 };
 
-/**
- * Downloaded titles are stored one row per title (plus a row listing their keys in order). Android can't read
- * back a single stored value larger than about 2 MB, which one row holding every downloaded chapter of every
- * title would reach for a large collection, and the whole list would then come back empty.
- */
-const rowKey = (seriesKey: string) => `${KEYS.index}:${seriesKey}`;
-
-const isDownloaded = (v: unknown): v is DownloadedSeries => {
-  const d = v as DownloadedSeries | null;
-  return !!d && typeof d === 'object' && typeof d.series?.key === 'string' && Array.isArray(d.chapters);
-};
-
 async function readJson<T>(key: string, fallback: T): Promise<T> {
   try {
     const raw = await AsyncStorage.getItem(key);
@@ -59,48 +42,6 @@ async function readJson<T>(key: string, fallback: T): Promise<T> {
   } catch {
     return fallback;
   }
-}
-
-async function loadItems(): Promise<DownloadedSeries[]> {
-  const index = await readJson<unknown>(KEYS.index, null);
-  if (Array.isArray(index)) {
-    const keys = index.filter((k): k is string => typeof k === 'string');
-    const rows = await AsyncStorage.multiGet(keys.map(rowKey)).catch(() => []);
-    const out: DownloadedSeries[] = [];
-    for (const [, raw] of rows) {
-      try {
-        const v: unknown = raw ? JSON.parse(raw) : null;
-        if (isDownloaded(v)) out.push(v);
-      } catch {
-        // One unreadable title doesn't hide the others.
-      }
-    }
-    return out;
-  }
-  // Builds before 1.4.0 kept everything in one row: move it over once. The old row is removed only after
-  // the new ones are written, so a failure here loses nothing and is tried again on the next start.
-  const legacy = (await readJson<unknown[]>(KEYS.legacyItems, [])).filter(isDownloaded);
-  try {
-    await AsyncStorage.multiSet([
-      ...legacy.map((i): [string, string] => [rowKey(i.series.key), JSON.stringify(i)]),
-      [KEYS.index, JSON.stringify(legacy.map((i) => i.series.key))],
-    ]);
-    await AsyncStorage.removeItem(KEYS.legacyItems);
-  } catch {}
-  return legacy;
-}
-
-/** Saves what changed between two versions of the list: the rows of new or changed titles, and the order. */
-async function saveItems(prev: DownloadedSeries[], next: DownloadedSeries[]) {
-  const before = new Map(prev.map((i) => [i.series.key, i]));
-  const after = new Set(next.map((i) => i.series.key));
-  const changed = next.filter((i) => before.get(i.series.key) !== i);
-  const gone = prev.filter((i) => !after.has(i.series.key)).map((i) => rowKey(i.series.key));
-  const sameOrder = prev.length === next.length && prev.every((i, n) => i.series.key === next[n].series.key);
-  const sets = changed.map((i): [string, string] => [rowKey(i.series.key), JSON.stringify(i)]);
-  if (!sameOrder) sets.push([KEYS.index, JSON.stringify(next.map((i) => i.series.key))]);
-  if (sets.length) await AsyncStorage.multiSet(sets);
-  if (gone.length) await AsyncStorage.multiRemove(gone);
 }
 
 export type Job = {
@@ -115,6 +56,38 @@ export type Job = {
 
 const jobKey = (seriesKey: string, chapterId: string) => `${seriesKey}|${chapterId}`;
 const keyOf = (j: Job) => jobKey(j.series.key, j.chapter.id);
+/** What is saved of the queue: progress and errors start over after a restart. */
+const leanQueue = (q: Job[]) => q.map((j) => ({ series: j.series, chapter: j.chapter, state: 'queued', done: 0, total: 0 }));
+
+const hasChapter = (list: DownloadedSeries[], seriesKey: string, chapterId: string) =>
+  !!list.find((i) => i.series.key === seriesKey)?.chapters.some((c) => c.id === chapterId);
+
+/** Adds titles found in the download folder to the list. The folder's copy of a chapter wins. */
+function mergeFound(list: DownloadedSeries[], found: DownloadedSeries[]) {
+  for (const f of found) {
+    const have = list.find((i) => i.series.key === f.series.key);
+    if (!have) {
+      list = [...list, f];
+      continue;
+    }
+    const inFolder = new Set(have.chapters.filter((c) => c.uris).map((c) => c.id));
+    const fresh = f.chapters.filter((c) => !inFolder.has(c.id));
+    const freshIds = new Set(fresh.map((c) => c.id));
+    // A copy of the chapter in the app's storage is deleted.
+    for (const c of have.chapters) if (freshIds.has(c.id)) removeDir(chapterDir(f.series.key, c.id, true));
+    list = list.map((i) =>
+      i === have
+        ? {
+            ...i,
+            dir: i.dir ?? f.dir,
+            cover: i.cover?.startsWith('content:') ? i.cover : (f.cover ?? i.cover),
+            chapters: [...i.chapters.filter((c) => !freshIds.has(c.id)), ...fresh],
+          }
+        : i,
+    );
+  }
+  return list;
+}
 
 type DownloadsContext = {
   items: DownloadedSeries[];
@@ -182,14 +155,26 @@ export function DownloadsProvider({ children }: { children: ReactNode }) {
   const movingRef = useRef(false);
   const folderOf = () => (choiceRef.current?.mode === 'folder' ? choiceRef.current.folder : null);
 
-  /** Saves run one after another, so a later change is never overwritten by an earlier one finishing late. */
-  const saving = useRef<Promise<void>>(Promise.resolve());
+  /**
+   * Nothing is saved until what is on disk has been read: saving earlier would replace it. Changes made before
+   * then are merged into what was read, and saved with it.
+   */
+  const loaded = useRef(false);
+
+  useEffect(() => {
+    let told = false;
+    setSaveErrorHandler((e) => {
+      if (told) return;
+      told = true;
+      Alert.alert('Couldn’t save your downloads list', `Changes may be lost when the app restarts. ${friendly(e)}`);
+    });
+  }, []);
 
   const commitItems = useCallback((next: DownloadedSeries[]) => {
     const prev = itemsRef.current;
     itemsRef.current = next;
     setItems(next);
-    saving.current = saving.current.then(() => saveItems(prev, next)).catch(() => {});
+    if (loaded.current) saveItems(prev, next);
   }, []);
 
   /** Rewrites the description of a title kept in the folder. One at a time, from the latest list. */
@@ -221,17 +206,14 @@ export function DownloadsProvider({ children }: { children: ReactNode }) {
     const next = fn(queueRef.current);
     queueRef.current = next;
     setQueue(next);
-    if (persist) {
-      const lean = next.map((j) => ({ series: j.series, chapter: j.chapter, state: 'queued', done: 0, total: 0 }));
-      AsyncStorage.setItem(KEYS.queue, JSON.stringify(lean)).catch(() => {});
-    }
+    if (persist && loaded.current) saveQueue(leanQueue(next));
   }, []);
 
   const setStartedKeys = useCallback((fn: (s: string[]) => string[]) => {
     const next = fn(startedRef.current);
     startedRef.current = next;
     setStarted(next);
-    AsyncStorage.setItem(KEYS.started, JSON.stringify(next)).catch(() => {});
+    if (loaded.current) saveStarted(next);
   }, []);
 
   const patch = useCallback(
@@ -350,12 +332,7 @@ export function DownloadsProvider({ children }: { children: ReactNode }) {
   // Restore everything, then pick up where an interrupted download stopped.
   useEffect(() => {
     (async () => {
-      const [saved, rawQueue, rawStarted, rawChoice] = await Promise.all([
-        loadItems(),
-        readJson<unknown>(KEYS.queue, []),
-        readJson<unknown>(KEYS.started, []),
-        readJson<FolderChoice | null>(KEYS.folder, null),
-      ]);
+      const [stored, rawChoice] = await Promise.all([loadAll(), readJson<FolderChoice | null>(KEYS.folder, null)]);
       if (rawChoice?.mode === 'app') {
         choiceRef.current = rawChoice;
         setChoice(rawChoice);
@@ -370,21 +347,38 @@ export function DownloadsProvider({ children }: { children: ReactNode }) {
           AsyncStorage.removeItem(KEYS.folder).catch(() => {});
         }
       }
-      const q = (Array.isArray(rawQueue) ? (rawQueue as Job[]) : []).filter((j) => j?.series?.key && j?.chapter?.id);
-      const s = Array.isArray(rawStarted) ? rawStarted.filter((k): k is string => typeof k === 'string') : [];
+      const q = (Array.isArray(stored.queue) ? (stored.queue as Job[]) : []).filter((j) => j?.series?.key && j?.chapter?.id);
+      // Changes made while loading (a folder chosen, chapters added) are kept.
+      const saved = itemsRef.current.length ? mergeFound(stored.items, itemsRef.current) : stored.items;
+      const restored = new Set(q.map(keyOf));
+      const all = [...q, ...queueRef.current.filter((j) => !restored.has(keyOf(j)))];
+      // Chapters that finished while the queue was being saved are not downloaded twice.
+      const pending = all.filter((j) => !hasChapter(saved, j.series.key, j.chapter.id));
+      const live = [...new Set([...stored.started, ...startedRef.current])].filter((key) =>
+        pending.some((j) => j.series.key === key),
+      );
       itemsRef.current = saved;
       setItems(saved);
-      // Chapters that finished while the queue was being saved are not downloaded twice.
-      const pending = q.filter(
-        (j) => !saved.find((i) => i.series.key === j.series.key)?.chapters.some((c) => c.id === j.chapter.id),
-      );
       queueRef.current = pending;
       setQueue(pending);
-      const live = s.filter((key) => pending.some((j) => j.series.key === key));
       startedRef.current = live;
       setStarted(live);
+      loaded.current = true;
+      saveItems(stored.items, saved);
+      saveQueue(leanQueue(pending));
+      saveStarted(live);
       pump();
+      // The old storage stopped saving once it was full, so chapters saved to the folder after that were missing
+      // from the list. Each title's folder describes its chapters, so they are found there.
+      const folder = folderOf();
+      if (stored.migrated && folder) {
+        const found = await scanFolder(folder.uri).catch(() => []);
+        if (!found.length) return;
+        commitItems(mergeFound(itemsRef.current, found));
+        updateQueue((jobs) => jobs.filter((j) => j.state === 'active' || !hasChapter(itemsRef.current, j.series.key, j.chapter.id)));
+      }
     })();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [pump]);
 
   // Opening the app renews the background allowance: carry on with anything that was waiting for it.
@@ -561,30 +555,7 @@ export function DownloadsProvider({ children }: { children: ReactNode }) {
     if (!folder) return null;
     // Downloads already in the folder (from before a reinstall, or another phone) join the list.
     const found = await scanFolder(folder.uri);
-    let list = itemsRef.current;
-    for (const f of found) {
-      const have = list.find((i) => i.series.key === f.series.key);
-      if (!have) {
-        list = [...list, f];
-        continue;
-      }
-      const inFolder = new Set(have.chapters.filter((c) => c.uris).map((c) => c.id));
-      const fresh = f.chapters.filter((c) => !inFolder.has(c.id));
-      const freshIds = new Set(fresh.map((c) => c.id));
-      // The folder's copy of a chapter replaces one in the app's storage, which is deleted.
-      for (const c of have.chapters) if (freshIds.has(c.id)) removeDir(chapterDir(f.series.key, c.id, true));
-      list = list.map((i) =>
-        i === have
-          ? {
-              ...i,
-              dir: i.dir ?? f.dir,
-              cover: i.cover?.startsWith('content:') ? i.cover : (f.cover ?? i.cover),
-              chapters: [...i.chapters.filter((c) => !freshIds.has(c.id)), ...fresh],
-            }
-          : i,
-      );
-    }
-    if (found.length) commitItems(list);
+    if (found.length) commitItems(mergeFound(itemsRef.current, found));
     setFolderLost(false);
     setFolderChoice({ mode: 'folder', folder });
     moveIntoFolder(folder);

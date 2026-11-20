@@ -1,6 +1,6 @@
 {
   "name": "manhwa-reader",
-  "version": "1.5.3",
+  "version": "1.5.4",
   "main": "expo-router/entry",
   "dependencies": {
     "@expo/vector-icons": "^15.1.1",
