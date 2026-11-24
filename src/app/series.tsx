@@ -329,7 +329,7 @@ export default function SeriesDetail() {
       {account.enabled ? (
         <Pressable onPress={openRecommend} style={[styles.action, { borderColor: t.border, marginHorizontal: 16, marginTop: 10 }]}>
           <Ionicons name="sparkles-outline" size={18} color={t.text} />
-          <Text style={{ color: t.text }}>Recommend this title</Text>
+          <Text style={{ color: t.text }}>Recommend title/bookmarks</Text>
         </Pressable>
       ) : null}
 
