@@ -163,6 +163,15 @@ export default function Settings() {
               <Ionicons name="chevron-forward" size={18} color={t.sub} />
             </Pressable>
 
+            <Pressable onPress={() => router.push('/recommend')} style={[styles.card, { backgroundColor: t.card }]}>
+              <Ionicons name="sparkles-outline" size={26} color={t.accent} />
+              <View style={styles.cardInfo}>
+                <Text style={[styles.cardTitle, { color: t.text }]}>Recommend</Text>
+                <Text style={{ color: t.sub, fontSize: 12 }}>See which of your titles and bookmarks you haven’t recommended, and recommend many at once</Text>
+              </View>
+              <Ionicons name="chevron-forward" size={18} color={t.sub} />
+            </Pressable>
+
             <View style={[styles.card, { backgroundColor: t.card }]}>
               <Ionicons name="sync-outline" size={26} color={t.accent} />
               <View style={styles.cardInfo}>

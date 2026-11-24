@@ -34,6 +34,7 @@ export default function RootLayout() {
             <Stack.Screen name="series" />
             <Stack.Screen name="settings" />
             <Stack.Screen name="account" />
+            <Stack.Screen name="recommend" />
             <Stack.Screen name="reader" options={{ animation: 'fade' }} />
             <Stack.Screen name="novel" />
           </Stack>
