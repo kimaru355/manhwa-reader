@@ -105,7 +105,7 @@ function TitleTab({ series, onClose }: { series: Series; onClose: () => void }) 
 
 /**
  * The user's own bookmarks of this title that the title doesn't already have: not among the author's bookmarks,
- * the approved community ones, or ones this user already suggested (unless that was rejected).
+ * the approved community ones, or ones this user already suggested (a rejected one can't be suggested again).
  */
 function BookmarksTab({ series }: { series: Series }) {
   const { getBookmarks } = useLibrary();
@@ -126,7 +126,7 @@ function BookmarksTab({ series }: { series: Series }) {
             ...author,
             ...community.map((b) => spot(b.chapterId, b.page)),
             ...suggested
-              .filter((s) => s.source === series.source && s.seriesId === series.id && s.status !== 'rejected')
+              .filter((s) => s.source === series.source && s.seriesId === series.id)
               .map((s) => spot(s.chapterId, s.page)),
           ]),
         );
@@ -146,7 +146,7 @@ function BookmarksTab({ series }: { series: Series }) {
   }
 
   const open = mine.filter((b) => !listed.has(spot(b.chapterId, b.page)));
-  if (!open.length) return <Text style={styles.empty}>All your bookmarks of this title are already listed or waiting for review.</Text>;
+  if (!open.length) return <Text style={styles.empty}>All your bookmarks of this title are already listed or have been reviewed.</Text>;
   const ready = open.filter((b) => b.note.trim());
 
   /** Sends bookmarks one at a time; the ones sent count as listed from then on. */
