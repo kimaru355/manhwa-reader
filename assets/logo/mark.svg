@@ -1,0 +1,13 @@
+<!-- The logo's mark alone: an open book whose pages are split into comic panels, with a speech bubble. 1024 box, centred. -->
+<g id="mark">
+  <!-- pages -->
+  <path d="M500 392 C430 344 330 330 232 346 L232 716 C330 700 430 712 500 760 Z" fill="#fff"/>
+  <path d="M524 392 C594 344 694 330 792 346 L792 716 C694 700 594 712 524 760 Z" fill="#fff"/>
+  <!-- panel gutters -->
+  <path d="M232 548 C320 534 420 540 500 576" stroke="var(--cut)" stroke-width="22" fill="none"/>
+  <path d="M360 548 L380 716" stroke="var(--cut)" stroke-width="22" fill="none"/>
+  <path d="M524 516 C604 478 694 470 792 480" stroke="var(--cut)" stroke-width="22" fill="none"/>
+  <!-- speech bubble -->
+  <path d="M640 168 h168 a64 64 0 0 1 64 64 v40 a64 64 0 0 1 -64 64 h-88 l-56 48 v-48 h-24 a64 64 0 0 1 -64 -64 v-40 a64 64 0 0 1 64 -64 z" fill="var(--bubble)"/>
+  <circle cx="680" cy="252" r="16" fill="var(--cut)"/><circle cx="724" cy="252" r="16" fill="var(--cut)"/><circle cx="768" cy="252" r="16" fill="var(--cut)"/>
+</g>
