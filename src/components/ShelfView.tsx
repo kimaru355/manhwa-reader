@@ -26,7 +26,9 @@ import {
 } from '../lib/listCategories';
 import { useTheme, type Theme } from '../lib/theme';
 import type { Series } from '../lib/types';
+import { useSelection } from '../lib/useSelection';
 import { EmptyState } from './EmptyState';
+import { SelectBar, SelectButton } from './SelectBar';
 import { SeriesGrid } from './SeriesGrid';
 
 /** Asking for a name: a new category (optionally for a title that should go straight into it) or a rename. */
@@ -45,6 +47,7 @@ export function ShelfView({ shelf, items, empty }: { shelf: Shelf; items: Series
   const [naming, setNaming] = useState<Naming | null>(null);
   const [menuFor, setMenuFor] = useState<ListCategory | null>(null);
   const [assignKey, setAssignKey] = useState<string | null>(null);
+  const sel = useSelection();
 
   // A deleted category can't stay selected.
   const active = selected && cats.some((c) => c.id === selected) ? selected : null;
@@ -83,8 +86,25 @@ export function ShelfView({ shelf, items, empty }: { shelf: Shelf; items: Series
 
   const activeName = cats.find((c) => c.id === active)?.name;
 
+  const removeMany = (keys: string[]) => {
+    const byKey = new Map(items.map((s) => [s.key, s]));
+    for (const k of keys) {
+      const s = byKey.get(k);
+      if (s) (shelf === 'favorites' ? lib.toggleFavorite : lib.toggleWishlist)(s);
+    }
+  };
+
   return (
     <View style={styles.flex}>
+      {sel.on ? (
+        <SelectBar
+          sel={sel}
+          keys={shown.map((s) => s.key)}
+          noun={shelf === 'favorites' ? 'favorites' : 'your wishlist'}
+          detail="They are removed from this list. Downloaded chapters are kept."
+          onDelete={removeMany}
+        />
+      ) : null}
       <ScrollView
         horizontal
         showsHorizontalScrollIndicator={false}
@@ -111,14 +131,18 @@ export function ShelfView({ shelf, items, empty }: { shelf: Shelf; items: Series
           <Text style={{ color: t.accent, fontSize: 13, fontWeight: '600' }}>{cats.length ? 'New' : 'New category'}</Text>
         </Pressable>
       </ScrollView>
-      <Text style={[styles.hint, { color: t.sub }]}>
-        {cats.length
-          ? 'Long-press a title to choose its categories, or a category to edit it.'
-          : 'Make categories to sort this list, then long-press a title to add it to one.'}
-      </Text>
+      <View style={styles.hintRow}>
+        <Text style={[styles.hint, { color: t.sub }]}>
+          {cats.length
+            ? 'Long-press a title to choose its categories, or a category to edit it.'
+            : 'Make categories to sort this list, then long-press a title to add it to one.'}
+        </Text>
+        {!sel.on && shown.length ? <SelectButton onPress={() => sel.start()} /> : null}
+      </View>
 
       <SeriesGrid
         data={shown}
+        selection={sel}
         onLongPress={setAssignKey}
         empty={
           <EmptyState
@@ -348,7 +372,8 @@ const styles = StyleSheet.create({
   chips: { gap: 8, paddingHorizontal: 12, paddingTop: 10, alignItems: 'center' },
   chip: { paddingHorizontal: 12, paddingVertical: 6, borderRadius: 16 },
   add: { flexDirection: 'row', alignItems: 'center', gap: 4, borderWidth: StyleSheet.hairlineWidth, backgroundColor: 'transparent' },
-  hint: { fontSize: 12, paddingHorizontal: 14, paddingTop: 6 },
+  hintRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingRight: 14, gap: 8 },
+  hint: { flex: 1, fontSize: 12, paddingHorizontal: 14, paddingTop: 6 },
   backdrop: { flex: 1, backgroundColor: 'rgba(0,0,0,0.45)' },
   sheet: { maxHeight: '70%', borderTopLeftRadius: 18, borderTopRightRadius: 18, paddingTop: 6 },
   sheetHead: { flexDirection: 'row', alignItems: 'center', gap: 12, paddingHorizontal: 18, paddingVertical: 12 },

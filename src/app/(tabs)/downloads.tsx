@@ -5,7 +5,9 @@ import { Alert, Pressable, StyleSheet, Text, View } from 'react-native';
 import { AppUpdateCard } from '../../components/AppUpdateCard';
 import { Cover } from '../../components/Cover';
 import { EmptyState } from '../../components/EmptyState';
+import { SelectBar, SelectButton } from '../../components/SelectBar';
 import { SeriesGrid } from '../../components/SeriesGrid';
+import { useSelection } from '../../lib/useSelection';
 import { useAppUpdate } from '../../lib/appUpdate';
 import { useDownloads, type Job } from '../../lib/downloads';
 import { openSeries } from '../../lib/series';
@@ -19,6 +21,7 @@ export default function Downloads() {
   const t = useTheme();
   const { items, queue, started, start, stop, cancelSeries, removeSeries, moveSeries } = useDownloads();
   const appUpdate = useAppUpdate();
+  const sel = useSelection();
 
   const groups = useMemo(() => {
     const map = new Map<string, Group>();
@@ -41,15 +44,6 @@ export default function Downloads() {
   if (items.length === 0 && groups.length === 0 && !appUpdate) return empty;
 
   const anyRunning = groups.some((g) => started.includes(g.series.key));
-
-  const confirmRemove = (key: string) => {
-    const item = items.find((i) => i.series.key === key);
-    if (!item) return;
-    Alert.alert(`Delete "${item.series.title}"?`, 'Removes its downloaded chapters from this phone.', [
-      { text: 'Cancel', style: 'cancel' },
-      { text: 'Delete', style: 'destructive', onPress: () => removeSeries(key) },
-    ]);
-  };
 
   const confirmCancel = (g: Group) =>
     Alert.alert(`Remove "${g.series.title}" from the list?`, `${g.jobs.length} chapter${g.jobs.length === 1 ? '' : 's'} will not be downloaded.`, [
@@ -143,23 +137,38 @@ export default function Downloads() {
         );
       })}
 
-      {items.length && (groups.length || appUpdate) ? (
-        <Text style={[styles.queueTitle, { color: t.text, marginTop: 16 }]}>Downloaded</Text>
+      {items.length ? (
+        <View style={[styles.queueHead, { marginTop: groups.length || appUpdate ? 16 : 0 }]}>
+          {groups.length || appUpdate ? <Text style={[styles.queueTitle, { color: t.text }]}>Downloaded</Text> : <View />}
+          {!sel.on ? <SelectButton onPress={() => sel.start()} /> : null}
+        </View>
       ) : null}
     </View>
   );
 
   return (
-    <SeriesGrid
-      data={items.map((i) => i.series)}
-      header={header}
-      empty={groups.length ? undefined : empty}
-      sub={(s) => {
-        const n = items.find((i) => i.series.key === s.key)?.chapters.length ?? 0;
-        return `${n} chapter${n === 1 ? '' : 's'} saved`;
-      }}
-      onLongPress={confirmRemove}
-    />
+    <View style={{ flex: 1 }}>
+      {sel.on ? (
+        <SelectBar
+          sel={sel}
+          keys={items.map((i) => i.series.key)}
+          noun="downloads"
+          detail="Removes their downloaded chapters from this phone."
+          onDelete={(keys) => keys.forEach(removeSeries)}
+        />
+      ) : null}
+      <SeriesGrid
+        data={items.map((i) => i.series)}
+        header={header}
+        empty={groups.length ? undefined : empty}
+        selection={sel}
+        sub={(s) => {
+          const n = items.find((i) => i.series.key === s.key)?.chapters.length ?? 0;
+          return `${n} chapter${n === 1 ? '' : 's'} saved`;
+        }}
+        onLongPress={(key) => sel.start(key)}
+      />
+    </View>
   );
 }
 

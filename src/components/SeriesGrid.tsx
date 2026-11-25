@@ -19,10 +19,12 @@ type Props = {
   empty?: React.ReactElement;
   sub?: (s: Series) => string | undefined;
   onLongPress?: (key: string) => void;
+  /** While set, taps pick titles instead of opening them. */
+  selection?: { on: boolean; picked: ReadonlySet<string>; toggle: (key: string) => void };
 };
 
 /** Cover grid for any list of titles. Titles with saved chapters get a badge. */
-export function SeriesGrid({ data, onRefresh, refreshing, onEnd, loadingMore, header, empty, sub, onLongPress }: Props) {
+export function SeriesGrid({ data, onRefresh, refreshing, onEnd, loadingMore, header, empty, sub, onLongPress, selection }: Props) {
   const t = useTheme();
   const { getDownloaded } = useDownloads();
 
@@ -41,14 +43,26 @@ export function SeriesGrid({ data, onRefresh, refreshing, onEnd, loadingMore, he
       refreshControl={
         onRefresh ? <RefreshControl refreshing={!!refreshing} onRefresh={onRefresh} tintColor={t.accent} /> : undefined
       }
+      extraData={selection?.picked}
       renderItem={({ item }) => {
         const saved = getDownloaded(item.key)?.chapters.length ?? 0;
         const line = sub?.(item);
+        const picking = !!selection?.on;
+        const picked = picking && selection!.picked.has(item.key);
         return (
-          <Pressable style={styles.cell} onPress={() => openSeries(item)} onLongPress={onLongPress ? () => onLongPress(item.key) : undefined}>
+          <Pressable
+            style={[styles.cell, picking && !picked && { opacity: 0.6 }]}
+            onPress={() => (picking ? selection!.toggle(item.key) : openSeries(item))}
+            onLongPress={onLongPress && !picking ? () => onLongPress(item.key) : undefined}
+          >
             <View>
               <Cover series={item} style={styles.cover} />
-              {saved ? (
+              {picking ? (
+                <View style={[styles.check, { backgroundColor: picked ? t.accent : 'rgba(0,0,0,0.45)', borderColor: '#fff' }]}>
+                  {picked ? <Ionicons name="checkmark" size={14} color="#fff" /> : null}
+                </View>
+              ) : null}
+              {saved && !picking ? (
                 <View style={[styles.badge, { backgroundColor: t.accent }]}>
                   <Ionicons name="download" size={11} color="#fff" />
                   <Text style={styles.badgeText}>{saved}</Text>
@@ -89,6 +103,17 @@ const styles = StyleSheet.create({
     paddingHorizontal: 6,
     paddingVertical: 2,
     borderRadius: 10,
+  },
+  check: {
+    position: 'absolute',
+    top: 6,
+    left: 6,
+    width: 22,
+    height: 22,
+    borderRadius: 11,
+    borderWidth: 1.5,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   badgeText: { color: '#fff', fontSize: 11, fontWeight: '700' },
   title: { marginTop: 6, fontSize: 14, fontWeight: '500', lineHeight: 18 },
