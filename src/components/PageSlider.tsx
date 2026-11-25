@@ -29,13 +29,12 @@ export function PageSlider({ value, total, onScrub, onCommit, accent }: Props) {
   const [dragPage, setShown] = useState(value);
   const shown = dragging ? dragPage : value;
   const usable = Math.max(width - PAD * 2, 1);
-  const last = Math.max(total - 1, 1);
   const enabled = total > 1 && width > 0;
 
   // Fraction 0..1 along the track. Animated, so the thumb glides.
   const [pos] = useState(() => new Animated.Value(0));
   const [grow] = useState(() => new Animated.Value(0));
-  const fracOf = (page: number) => (total > 1 ? (Math.min(Math.max(page, 1), total) - 1) / last : 0);
+  const fracOf = (page: number, n = total) => (n > 1 ? (Math.min(Math.max(page, 1), n) - 1) / (n - 1) : 0);
 
   // Everything the gesture handlers need, kept in a ref because PanResponder is made once.
   const liveRef = useRef({ total, usable, left: 0, page: value, onScrub, onCommit });
@@ -48,7 +47,8 @@ export function PageSlider({ value, total, onScrub, onCommit, accent }: Props) {
   });
 
   const moveTo = (page: number, animated: boolean) => {
-    const f = fracOf(page);
+    // Reads the page count at touch time: the responder is made once, when the count may still be unknown.
+    const f = fracOf(page, live.total);
     if (animated) {
       Animated.spring(pos, { toValue: f, useNativeDriver: false, speed: 28, bounciness: 5 }).start();
     } else {
