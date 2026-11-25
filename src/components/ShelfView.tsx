@@ -27,6 +27,7 @@ import {
 import { useTheme, type Theme } from '../lib/theme';
 import type { Series } from '../lib/types';
 import { useSelection } from '../lib/useSelection';
+import { Chip, ChipRow, chipBox } from './ChipRow';
 import { EmptyState } from './EmptyState';
 import { SelectBar, SelectButton } from './SelectBar';
 import { SeriesGrid } from './SeriesGrid';
@@ -58,14 +59,7 @@ export function ShelfView({ shelf, items, empty }: { shelf: Shelf; items: Series
   if (items.length === 0) return empty;
 
   const chip = (key: string, label: string, on: boolean, onPress: () => void, onLongPress?: () => void) => (
-    <Pressable
-      key={key}
-      onPress={onPress}
-      onLongPress={onLongPress}
-      style={[styles.chip, { backgroundColor: on ? t.accent : t.card }]}
-    >
-      <Text style={{ color: on ? '#fff' : t.sub, fontSize: 13, fontWeight: on ? '600' : '400' }}>{label}</Text>
-    </Pressable>
+    <Chip key={key} label={label} on={on} onPress={onPress} onLongPress={onLongPress} />
   );
 
   const saveName = (name: string) => {
@@ -105,13 +99,7 @@ export function ShelfView({ shelf, items, empty }: { shelf: Shelf; items: Series
           onDelete={removeMany}
         />
       ) : null}
-      <ScrollView
-        horizontal
-        showsHorizontalScrollIndicator={false}
-        contentContainerStyle={styles.chips}
-        style={styles.chipBar}
-        keyboardShouldPersistTaps="handled"
-      >
+      <ChipRow contentStyle={styles.chips}>
         {chip('all', `All (${items.length})`, !active, () => setSelected(null))}
         {cats.map((c) =>
           chip(
@@ -124,13 +112,13 @@ export function ShelfView({ shelf, items, empty }: { shelf: Shelf; items: Series
         )}
         <Pressable
           onPress={() => setNaming({ mode: 'new' })}
-          style={[styles.chip, styles.add, { borderColor: t.border }]}
+          style={[styles.add, { borderColor: t.border }]}
           accessibilityLabel="New category"
         >
           <Ionicons name="add" size={15} color={t.accent} />
           <Text style={{ color: t.accent, fontSize: 13, fontWeight: '600' }}>{cats.length ? 'New' : 'New category'}</Text>
         </Pressable>
-      </ScrollView>
+      </ChipRow>
       <View style={styles.hintRow}>
         <Text style={[styles.hint, { color: t.sub }]}>
           {cats.length
@@ -368,10 +356,8 @@ function NamePrompt({
 
 const styles = StyleSheet.create({
   flex: { flex: 1 },
-  chipBar: { flexGrow: 0 },
-  chips: { gap: 8, paddingHorizontal: 12, paddingTop: 10, alignItems: 'center' },
-  chip: { paddingHorizontal: 12, paddingVertical: 6, borderRadius: 16 },
-  add: { flexDirection: 'row', alignItems: 'center', gap: 4, borderWidth: StyleSheet.hairlineWidth, backgroundColor: 'transparent' },
+  chips: { paddingTop: 10 },
+  add: { ...chipBox, flexDirection: 'row', gap: 4, paddingHorizontal: 14, borderRadius: 18, borderWidth: StyleSheet.hairlineWidth, backgroundColor: 'transparent' },
   hintRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingRight: 14, gap: 8 },
   hint: { flex: 1, fontSize: 12, paddingHorizontal: 14, paddingTop: 6 },
   backdrop: { flex: 1, backgroundColor: 'rgba(0,0,0,0.45)' },

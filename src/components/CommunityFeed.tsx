@@ -1,6 +1,6 @@
 import { Ionicons } from '@expo/vector-icons';
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { ActivityIndicator, FlatList, Pressable, RefreshControl, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
+import { ActivityIndicator, FlatList, Pressable, RefreshControl, StyleSheet, Text, TextInput, View } from 'react-native';
 
 import { confirmAdult } from '../lib/adult';
 import {
@@ -15,6 +15,7 @@ import { TIER_LABEL, TIER_ORDER } from '../lib/recs';
 import { openSeries } from '../lib/series';
 import { useTheme } from '../lib/theme';
 import type { Category, Tier } from '../lib/types';
+import { Chip, ChipRow } from './ChipRow';
 import { Cover } from './Cover';
 import { EmptyState } from './EmptyState';
 import { Votes } from './Votes';
@@ -97,11 +98,7 @@ export function CommunityFeed() {
   }, [load, query]);
 
 
-  const chip = (label: string, on: boolean, onPress: () => void) => (
-    <Pressable key={label} onPress={onPress} style={[styles.chip, { backgroundColor: on ? t.accent : t.card }]}>
-      <Text style={{ color: on ? '#fff' : t.sub, fontSize: 13, fontWeight: on ? '600' : '400' }}>{label}</Text>
-    </Pressable>
-  );
+  const chip = (label: string, on: boolean, onPress: () => void) => <Chip key={label} label={label} on={on} onPress={onPress} />;
 
   return (
     <View style={styles.flex}>
@@ -119,21 +116,21 @@ export function CommunityFeed() {
           />
           {query ? <Ionicons name="close-circle" size={18} color={t.sub} onPress={() => setQuery('')} /> : null}
         </View>
-        <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.chips}>
+        <ChipRow>
           {SORTS.map((s) => chip(s.label, sort === s.value, () => setSort(s.value)))}
-        </ScrollView>
-        <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.chips}>
+        </ChipRow>
+        <ChipRow>
           {CATEGORIES.map((c) =>
             chip(c.label, category === c.value, async () => {
               if (c.value === 'adult' && !(await confirmAdult())) return;
               setCategory(c.value);
             }),
           )}
-        </ScrollView>
-        <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.chips}>
+        </ChipRow>
+        <ChipRow>
           {chip('Any tier', tier === 'all', () => setTier('all'))}
           {TIER_ORDER.map((x) => chip(TIER_LABEL[x], tier === x, () => setTier(x)))}
-        </ScrollView>
+        </ChipRow>
       </View>
 
       {error && items.length === 0 ? (
@@ -189,8 +186,6 @@ const styles = StyleSheet.create({
   filters: { gap: 8, paddingTop: 10 },
   search: { flexDirection: 'row', alignItems: 'center', gap: 8, marginHorizontal: 12, paddingHorizontal: 12, borderRadius: 10 },
   input: { flex: 1, height: 42, fontSize: 15 },
-  chips: { gap: 8, paddingHorizontal: 12 },
-  chip: { paddingHorizontal: 12, paddingVertical: 6, borderRadius: 16 },
   list: { paddingTop: 6, flexGrow: 1 },
   row: { flexDirection: 'row', alignItems: 'center', gap: 12, paddingHorizontal: 12, paddingVertical: 12, borderBottomWidth: StyleSheet.hairlineWidth },
   cover: { width: 60, height: 84 },

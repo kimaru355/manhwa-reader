@@ -1,10 +1,11 @@
 import { Ionicons } from '@expo/vector-icons';
 import { useState } from 'react';
-import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { Pressable, StyleSheet, Text, View } from 'react-native';
 
 import { SPEEDS, speedLabel, type Speed, type VoiceOption } from '../lib/readAloud';
 import type { ReadAloudStatus } from '../lib/useReadAloud';
 import { useTheme } from '../lib/theme';
+import { ChipRow, chipBox } from './ChipRow';
 
 type Props = {
   status: ReadAloudStatus;
@@ -100,7 +101,7 @@ export function ReadAloudBar(p: Props) {
             ))}
           </View>
           <Text style={[styles.heading, { color: t.sub }]}>Voice (on this phone, works offline)</Text>
-          <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.voices}>
+          <ChipRow contentStyle={styles.voices}>
             {p.voices.map((v) => {
               const on = v.id === p.voice.id;
               return (
@@ -109,7 +110,7 @@ export function ReadAloudBar(p: Props) {
                 </Pressable>
               );
             })}
-          </ScrollView>
+          </ChipRow>
         </View>
       ) : null}
     </View>
@@ -128,7 +129,7 @@ const styles = StyleSheet.create({
   heading: { fontSize: 12, fontWeight: '600' },
   speeds: { flexDirection: 'row', gap: 6 },
   speed: { flex: 1, alignItems: 'center', paddingHorizontal: 0 },
-  voices: { gap: 6, paddingBottom: 2 },
-  pill: { borderWidth: 1, borderRadius: 16, paddingHorizontal: 12, paddingVertical: 7 },
+  voices: { gap: 6, paddingHorizontal: 0, paddingBottom: 2 },
+  pill: { ...chipBox, borderWidth: 1, borderRadius: 18, paddingHorizontal: 12, paddingVertical: 7 },
   pillText: { fontSize: 13, fontWeight: '600' },
 });
