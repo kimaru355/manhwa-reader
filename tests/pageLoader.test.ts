@@ -35,7 +35,7 @@ test('keeps MIN_AHEAD pages ready ahead of the reader', async () => {
   const l = new PageLoader(100, 0, r.fetchOne);
   await l.loadInitial();
   r.calls.length = 0;
-  l.advance(INITIAL_PAGES - 1 - MIN_AHEAD);
+  l.advance(Math.max(0, INITIAL_PAGES - 1 - MIN_AHEAD));
   await settle();
   assert.deepEqual(r.calls, Array.from({ length: STEP }, (_, k) => INITIAL_PAGES + k));
 });

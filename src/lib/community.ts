@@ -128,6 +128,21 @@ export const submitBookmark = (
     },
   });
 
+/** Sends a rejected suggestion for another review (the server puts it back in the queue). */
+export const resubmitSuggestion = (s: Suggestion) =>
+  api.authed<{ id: string; status: string }>('/community/bookmarks', {
+    method: 'POST',
+    body: {
+      source: s.source,
+      seriesId: s.seriesId,
+      seriesTitle: s.seriesTitle,
+      chapterId: s.chapterId,
+      chapterName: s.chapterName,
+      page: s.page,
+      note: (s.note ?? '').trim(),
+    },
+  });
+
 export const mySuggestions = async () => (await api.authed<{ items: Suggestion[] }>('/me/community-bookmarks')).items;
 
 export const withdrawSuggestion = (id: string) =>

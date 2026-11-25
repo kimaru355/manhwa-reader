@@ -244,7 +244,9 @@ function BookmarksTab() {
         for (const { s, items } of community) for (const b of items) map.set(spot(s.key, b.chapterId, b.page), 'On the title (community)');
         for (const g of suggested) {
           const key = `${g.source}:${g.seriesId}`;
-          if (!map.has(spot(key, g.chapterId, g.page))) map.set(spot(key, g.chapterId, g.page), `Suggested · ${g.status}`);
+          if (!map.has(spot(key, g.chapterId, g.page))) {
+            map.set(spot(key, g.chapterId, g.page), g.status === 'rejected' ? 'Not accepted before · can be sent again' : `Suggested · ${g.status}`);
+          }
         }
         setTaken(map);
       })
@@ -259,7 +261,7 @@ function BookmarksTab() {
     const bySeries = new Map<string, Section>();
     for (const b of mine) {
       const why = taken.get(spot(b.seriesKey, b.chapterId, b.page));
-      const state: MarkState = !why ? 'new' : why.startsWith('Suggested') ? 'suggested' : 'listed';
+      const state: MarkState = !why || why.startsWith('Not accepted') ? 'new' : why.startsWith('Suggested') ? 'suggested' : 'listed';
       const sec = bySeries.get(b.seriesKey) ?? { series: known.get(b.seriesKey)!, data: [] };
       sec.data.push({ mark: b, state, label: why ?? (b.note.trim() ? 'Not recommended yet' : 'Needs a note before it can be recommended') });
       bySeries.set(b.seriesKey, sec);

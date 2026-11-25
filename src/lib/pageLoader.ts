@@ -1,5 +1,5 @@
 /** Pages loaded before a chapter opens. */
-export const INITIAL_PAGES = 10;
+export const INITIAL_PAGES = 5;
 /** More pages are requested once this many (or fewer) are left ahead of the reader. */
 export const MIN_AHEAD = 5;
 /** How many pages are added each time. */

@@ -60,6 +60,8 @@ export function BookmarksSheet({
   const insets = useSafeAreaInsets();
   const [note, setNote] = useState('');
   const [editing, setEditing] = useState<Bookmark | null>(null);
+  // Community (the author's and other readers' bookmarks) first; Mine is the reader's own saved ones.
+  const [tab, setTab] = useState<'community' | 'mine'>('community');
 
   const order = (b: Bookmark) => {
     const i = chapters.findIndex((c) => c.id === b.chapterId);
@@ -67,15 +69,20 @@ export function BookmarksSheet({
   };
   const sorted = [...bookmarks].sort((a, b) => order(a) - order(b) || a.page - b.page);
 
+  // Community tab: the author's bookmarks, then other readers'. Ids tell them apart.
+  const shared = [...author, ...community];
+
   const save = () => {
     if (editing) onEdit(editing.id, note);
     else onAdd(note);
+    setTab('mine');
     setEditing(null);
     setNote('');
   };
 
   const startEdit = (b: Bookmark) => {
     setEditing(b);
+    setTab('mine');
     setNote(b.note);
   };
 
@@ -86,6 +93,7 @@ export function BookmarksSheet({
 
   const close = () => {
     cancelEdit();
+    setTab('community');
     onClose();
   };
 
@@ -108,7 +116,7 @@ export function BookmarksSheet({
       <KeyboardAvoidingView behavior="padding">
         <View style={[styles.sheet, { paddingBottom: insets.bottom }]}>
           <FlatList
-            data={sorted}
+            data={tab === 'mine' ? sorted : shared}
             keyboardShouldPersistTaps="handled"
             keyExtractor={(b) => b.id}
             ListHeaderComponent={
@@ -140,57 +148,59 @@ export function BookmarksSheet({
                     </Pressable>
                   ) : null}
                 </View>
-                {author.length ? (
-                  <View>
-                    <Text style={[styles.title, { paddingTop: 8 }]}>Author’s bookmarks</Text>
-                    {author.map((b) => (
-                      <Pressable key={b.id} style={styles.row} onPress={() => onOpen(b)}>
-                        <Ionicons name="sparkles" size={18} color={ACCENT} />
-                        <View style={styles.rowText}>
-                          <Text numberOfLines={1} style={styles.rowTitle}>
-                            {b.chapterName} · p.{b.page}
-                          </Text>
-                          {b.note ? (
-                            <Text numberOfLines={2} style={styles.rowNote}>
-                              {b.note}
-                            </Text>
-                          ) : null}
-                        </View>
-                        {seriesRef ? (
-                          <Votes type="author_bookmark" id={authorBookmarkId(seriesRef.source, seriesRef.id, b.chapterId, b.page)} dark />
-                        ) : null}
-                      </Pressable>
-                    ))}
-                  </View>
-                ) : null}
-                {community.length ? (
-                  <View>
-                    <Text style={[styles.title, { paddingTop: 8 }]}>Community bookmarks</Text>
-                    {community.map((b) => (
-                      <Pressable key={b.id} style={styles.row} onPress={() => onOpen(b)}>
-                        <Ionicons name="people" size={18} color={ACCENT} />
-                        <View style={styles.rowText}>
-                          <Text numberOfLines={1} style={styles.rowTitle}>
-                            {b.chapterName} · p.{b.page}
-                          </Text>
-                          {b.note ? (
-                            <Text numberOfLines={2} style={styles.rowNote}>
-                              {b.note}
-                            </Text>
-                          ) : null}
-                        </View>
-                        <Votes type="community_bookmark" id={b.id.replace(/^community-/, '')} dark />
-                      </Pressable>
-                    ))}
-                  </View>
-                ) : null}
-                <Text style={[styles.title, { paddingTop: 8 }]}>
-                  Saved{sorted.length ? ` (${sorted.length})` : ''}
-                </Text>
+                <View style={styles.tabs}>
+                  {(
+                    [
+                      ['community', `Community${shared.length ? ` (${shared.length})` : ''}`],
+                      ['mine', `Mine${sorted.length ? ` (${sorted.length})` : ''}`],
+                    ] as const
+                  ).map(([key, label]) => (
+                    <Pressable
+                      key={key}
+                      onPress={() => setTab(key)}
+                      style={[styles.tab, tab === key && { backgroundColor: ACCENT }]}
+                      accessibilityState={{ selected: tab === key }}
+                    >
+                      <Text style={[styles.tabText, tab === key && { color: '#fff' }]}>{label}</Text>
+                    </Pressable>
+                  ))}
+                </View>
               </View>
             }
-            ListEmptyComponent={<Text style={styles.empty}>No bookmarks of your own yet.</Text>}
+            ListEmptyComponent={
+              <Text style={styles.empty}>
+                {tab === 'mine'
+                  ? 'No bookmarks of your own yet.'
+                  : 'No community bookmarks for this title yet. Switch to Mine to see your own.'}
+              </Text>
+            }
             renderItem={({ item }) => {
+              if (tab === 'community') {
+                const isAuthor = item.id.startsWith('author-');
+                return (
+                  <Pressable style={styles.row} onPress={() => onOpen(item)}>
+                    <Ionicons name={isAuthor ? 'sparkles' : 'people'} size={18} color={ACCENT} />
+                    <View style={styles.rowText}>
+                      <Text numberOfLines={1} style={styles.rowTitle}>
+                        {item.chapterName} · p.{item.page}
+                        {isAuthor ? '  · Author' : ''}
+                      </Text>
+                      {item.note ? (
+                        <Text numberOfLines={2} style={styles.rowNote}>
+                          {item.note}
+                        </Text>
+                      ) : null}
+                    </View>
+                    {seriesRef ? (
+                      isAuthor ? (
+                        <Votes type="author_bookmark" id={authorBookmarkId(seriesRef.source, seriesRef.id, item.chapterId, item.page)} dark />
+                      ) : (
+                        <Votes type="community_bookmark" id={item.id.replace(/^community-/, '')} dark />
+                      )
+                    ) : null}
+                  </Pressable>
+                );
+              }
               const exists = order(item) !== Number.MAX_SAFE_INTEGER;
               return (
                 <Pressable style={[styles.row, !exists && { opacity: 0.45 }]} disabled={!exists} onPress={() => onOpen(item)}>
@@ -256,6 +266,9 @@ const styles = StyleSheet.create({
   saveText: { color: '#fff', fontWeight: '600', fontSize: 15 },
   cancel: { alignItems: 'center', paddingVertical: 6 },
   cancelText: { color: '#9A9AA4', fontSize: 14 },
+  tabs: { flexDirection: 'row', gap: 8, paddingHorizontal: 16, paddingTop: 14, paddingBottom: 6 },
+  tab: { paddingHorizontal: 14, minHeight: 34, justifyContent: 'center', borderRadius: 17, backgroundColor: '#26262C' },
+  tabText: { color: '#9A9AA4', fontSize: 14, fontWeight: '600' },
   empty: { color: '#9A9AA4', paddingHorizontal: 16, paddingVertical: 12 },
   row: { flexDirection: 'row', alignItems: 'center', gap: 12, paddingHorizontal: 16, paddingVertical: 12 },
   rowText: { flex: 1, gap: 2 },

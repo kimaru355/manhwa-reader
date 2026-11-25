@@ -1,5 +1,4 @@
 import { Ionicons } from '@expo/vector-icons';
-import Slider from '@react-native-community/slider';
 import { Image } from 'expo-image';
 import { useKeepAwake } from 'expo-keep-awake';
 import { router, useLocalSearchParams } from 'expo-router';
@@ -23,6 +22,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { BookmarksSheet } from '../components/BookmarksSheet';
 import { Comments } from '../components/Comments';
+import { PageSlider } from '../components/PageSlider';
 import { StatusPill } from '../components/StatusPill';
 import { useAccount } from '../lib/account';
 import { submitBookmark } from '../lib/community';
@@ -485,21 +485,12 @@ An admin reviews it before anyone else sees it.`, [
               <Pressable hitSlop={10} disabled={!prev} onPress={() => goTo(prev)} style={!prev && styles.off}>
                 <Ionicons name="play-skip-back" size={22} color="#fff" />
               </Pressable>
-              <Slider
-                style={styles.slider}
-                minimumValue={1}
-                maximumValue={Math.max(total, 2)}
-                step={1}
+              <PageSlider
                 value={page}
-                disabled={total < 2}
-                minimumTrackTintColor={ACCENT}
-                maximumTrackTintColor="#555"
-                thumbTintColor="#fff"
-                onValueChange={(v) => setScrubbing(Math.round(v))}
-                onSlidingComplete={(v) => {
-                  setScrubbing(null);
-                  jump(v);
-                }}
+                total={total}
+                accent={ACCENT}
+                onScrub={setScrubbing}
+                onCommit={jump}
               />
               <Pressable hitSlop={10} disabled={!next} onPress={() => goTo(next)} style={!next && styles.off}>
                 <Ionicons name="play-skip-forward" size={22} color="#fff" />
@@ -576,7 +567,6 @@ const styles = StyleSheet.create({
   },
   pageLabel: { color: '#fff', textAlign: 'center', fontSize: 13, marginBottom: 2 },
   sliderRow: { flexDirection: 'row', alignItems: 'center', gap: 8 },
-  slider: { flex: 1, height: 40 },
   off: { opacity: 0.3 },
   backdrop: { flex: 1, backgroundColor: 'rgba(0,0,0,0.5)' },
   sheet: { maxHeight: '60%', backgroundColor: '#1A1A1F', borderTopLeftRadius: 18, borderTopRightRadius: 18 },

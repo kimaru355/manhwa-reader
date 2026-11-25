@@ -5,7 +5,7 @@ import { ActivityIndicator, Alert, Pressable, ScrollView, StyleSheet, Text, Text
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { useAccount, type UserRecommendation } from '../lib/account';
-import { mySuggestions, withdrawSuggestion, type Suggestion } from '../lib/community';
+import { mySuggestions, resubmitSuggestion, withdrawSuggestion, type Suggestion } from '../lib/community';
 import { friendly } from '../lib/errors';
 import { TIER_LABEL } from '../lib/recs';
 import { useTheme } from '../lib/theme';
@@ -216,6 +216,22 @@ export default function Account() {
                       {s.status === 'rejected' && s.rejectReason ? `: ${s.rejectReason}` : ''}
                     </Text>
                   </View>
+                  {s.status === 'rejected' && s.note?.trim() ? (
+                    <Pressable
+                      hitSlop={10}
+                      accessibilityLabel="Send again for review"
+                      onPress={() =>
+                        resubmitSuggestion(s)
+                          .then(() => {
+                            loadSuggestions();
+                            Alert.alert('Sent again', 'It is back in the queue for another review.');
+                          })
+                          .catch((e) => Alert.alert("Couldn't send it", friendly(e)))
+                      }
+                    >
+                      <Ionicons name="refresh" size={20} color={t.accent} />
+                    </Pressable>
+                  ) : null}
                   <Pressable
                     hitSlop={10}
                     onPress={() =>

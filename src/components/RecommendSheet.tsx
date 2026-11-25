@@ -126,7 +126,8 @@ function BookmarksTab({ series }: { series: Series }) {
             ...author,
             ...community.map((b) => spot(b.chapterId, b.page)),
             ...suggested
-              .filter((s) => s.source === series.source && s.seriesId === series.id)
+              // A rejected one can be sent again, so it stays on the list.
+              .filter((s) => s.status !== 'rejected' && s.source === series.source && s.seriesId === series.id)
               .map((s) => spot(s.chapterId, s.page)),
           ]),
         );
