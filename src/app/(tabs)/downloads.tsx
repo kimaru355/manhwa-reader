@@ -117,7 +117,16 @@ export default function Downloads() {
                 <Text style={{ color: on ? t.text : '#fff', fontWeight: '600', fontSize: 13 }}>{on ? 'Pause' : 'Start'}</Text>
               </Pressable>
               <View style={styles.order}>
-                <Pressable hitSlop={8} disabled={gi === 0} onPress={() => moveSeries(g.series.key, -1)} style={{ opacity: gi === 0 ? 0.3 : 1 }}>
+                <Pressable
+                  hitSlop={8}
+                  disabled={gi === 0}
+                  onPress={() => moveSeries(g.series.key, 'top')}
+                  style={{ opacity: gi === 0 ? 0.3 : 1 }}
+                  accessibilityLabel="Push to top"
+                >
+                  <Ionicons name="arrow-up-circle" size={26} color={gi === 0 ? t.sub : t.accent} />
+                </Pressable>
+                <Pressable hitSlop={8} disabled={gi === 0} onPress={() => moveSeries(g.series.key, -1)} style={{ opacity: gi === 0 ? 0.3 : 1 }} accessibilityLabel="Push up">
                   <Ionicons name="arrow-up-circle-outline" size={26} color={t.sub} />
                 </Pressable>
                 <Pressable

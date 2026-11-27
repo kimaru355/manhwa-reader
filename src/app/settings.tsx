@@ -207,6 +207,17 @@ export default function Settings() {
           </>
         ) : null}
 
+        {/* ---------------------------------------------------------------- Feedback */}
+        <Text style={[styles.section, { color: t.sub, marginTop: 20 }]}>FEEDBACK</Text>
+        <Pressable onPress={() => router.push('/feedback')} style={[styles.card, { backgroundColor: t.card }]}>
+          <Ionicons name="chatbox-ellipses-outline" size={26} color={t.accent} />
+          <View style={styles.cardInfo}>
+            <Text style={[styles.cardTitle, { color: t.text }]}>Request a feature or give feedback</Text>
+            <Text style={{ color: t.sub, fontSize: 12 }}>Report a bug, ask for something new, or tell us what you think</Text>
+          </View>
+          <Ionicons name="chevron-forward" size={18} color={t.sub} />
+        </Pressable>
+
         {/* ---------------------------------------------------------------- Export & import */}
         <Text style={[styles.section, { color: t.sub, marginTop: 20 }]}>EXPORT &amp; IMPORT</Text>
         <Text style={[styles.hint, { color: t.sub }]}>

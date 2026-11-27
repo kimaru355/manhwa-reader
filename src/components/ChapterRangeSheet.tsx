@@ -19,19 +19,23 @@ type Props = {
   /** For a range: how many chapters it would add to Downloads, or delete. */
   count: (list: Chapter[]) => number;
   onConfirm: (mode: RangeMode, list: Chapter[]) => void;
+  /** Ids of chapters with a bookmark (yours, the author's or the community's), for "Chapter bookmarks" only. */
+  bookmarked?: ReadonlySet<string>;
 };
 
 /** Pick chapters by number ("1" to "100") to download or delete. */
-export function ChapterRangeSheet({ mode, onClose, chapters, current, count, onConfirm }: Props) {
+export function ChapterRangeSheet({ mode, onClose, chapters, current, count, onConfirm, bookmarked }: Props) {
   const t = useTheme();
   const insets = useSafeAreaInsets();
   const [from, setFrom] = useState('');
   const [to, setTo] = useState('');
+  const [onlyMarks, setOnlyMarks] = useState(false);
   const total = chapters.length;
 
   const close = () => {
     setFrom('');
     setTo('');
+    setOnlyMarks(false);
     onClose();
   };
 
@@ -40,11 +44,16 @@ export function ChapterRangeSheet({ mode, onClose, chapters, current, count, onC
     setTo(String(r.end));
   };
 
-  const typed = from.trim() || to.trim();
-  const range = typed ? parseRange(from, to, total) : null;
-  const list = range?.ok ? sliceRange(chapters, range) : [];
-  const n = list.length ? count(list) : 0;
   const deleting = mode === 'delete';
+  const marks = !deleting && bookmarked ? bookmarked : null;
+  const markedCount = marks ? chapters.filter((c) => marks.has(c.id)).length : 0;
+  const filtering = onlyMarks && !!marks;
+  const typed = from.trim() || to.trim();
+  // With "Chapter bookmarks" on, an empty range means every chapter of the title.
+  const range = typed || filtering ? parseRange(from, to, total) : null;
+  const inRange = range?.ok ? sliceRange(chapters, range) : [];
+  const list = filtering ? inRange.filter((c) => marks.has(c.id)) : inRange;
+  const n = list.length ? count(list) : 0;
 
   // Shortcuts: the next chapters from where you are, or the chapters you have already read.
   const at = current >= 0 ? current + 1 : 1;
@@ -61,9 +70,13 @@ export function ChapterRangeSheet({ mode, onClose, chapters, current, count, onC
     ? `Type chapter numbers between 1 and ${total}.`
     : !range.ok
       ? range.message
-      : `${range.start === range.end ? `Chapter ${range.start}` : `Chapters ${range.start}–${range.end}`}: “${list[0].name}”${
-          list.length > 1 ? ` to “${list[list.length - 1].name}”` : ''
-        }`;
+      : filtering
+        ? list.length
+          ? `${list.length} bookmarked chapter${list.length === 1 ? '' : 's'} in ${range.start === range.end ? `chapter ${range.start}` : `chapters ${range.start}–${range.end}`}`
+          : `No bookmarked chapters in ${range.start === range.end ? `chapter ${range.start}` : `chapters ${range.start}–${range.end}`}.`
+        : `${range.start === range.end ? `Chapter ${range.start}` : `Chapters ${range.start}–${range.end}`}: “${list[0].name}”${
+            list.length > 1 ? ` to “${list[list.length - 1].name}”` : ''
+          }`;
 
   const action = deleting
     ? n
@@ -117,6 +130,26 @@ export function ChapterRangeSheet({ mode, onClose, chapters, current, count, onC
             </View>
           ) : null}
 
+          {marks ? (
+            <Pressable
+              onPress={() => setOnlyMarks((v) => !v)}
+              disabled={!markedCount}
+              style={[styles.toggle, { borderColor: onlyMarks ? t.accent : t.border, opacity: markedCount ? 1 : 0.5 }]}
+              accessibilityRole="switch"
+              accessibilityState={{ checked: onlyMarks }}
+            >
+              <Ionicons name={onlyMarks ? 'checkbox' : 'square-outline'} size={20} color={onlyMarks ? t.accent : t.sub} />
+              <View style={{ flex: 1 }}>
+                <Text style={{ color: t.text, fontSize: 14, fontWeight: '600' }}>Chapter bookmarks only</Text>
+                <Text style={{ color: t.sub, fontSize: 12 }}>
+                  {markedCount
+                    ? `${markedCount} chapter${markedCount === 1 ? ' has' : 's have'} bookmarks (yours, the author's or the community's).`
+                    : 'No chapter of this title has a bookmark yet.'}
+                </Text>
+              </View>
+            </Pressable>
+          ) : null}
+
           <Text numberOfLines={3} style={{ color: range && !range.ok ? t.danger : t.sub, fontSize: 13 }}>
             {summary}
           </Text>
@@ -148,6 +181,7 @@ const styles = StyleSheet.create({
   title: { fontSize: 17, fontWeight: '700' },
   row: { flexDirection: 'row', alignItems: 'center', gap: 10 },
   input: { flex: 1, height: 46, borderRadius: 10, borderWidth: 1, paddingHorizontal: 12, fontSize: 16 },
+  toggle: { flexDirection: 'row', alignItems: 'center', gap: 10, borderWidth: 1, borderRadius: 12, padding: 10 },
   shortcuts: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
   shortcut: { borderWidth: 1, borderRadius: 16, paddingHorizontal: 12, paddingVertical: 7 },
   confirm: { flexDirection: 'row', gap: 8, alignItems: 'center', justifyContent: 'center', borderRadius: 12, paddingVertical: 13 },

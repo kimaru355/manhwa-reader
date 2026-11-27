@@ -3,7 +3,7 @@
     "name": "Manhwa Reader",
     "slug": "manhwa-reader",
     "scheme": "manhwareader",
-    "version": "2.6.1",
+    "version": "2.7.0",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
     "userInterfaceStyle": "automatic",

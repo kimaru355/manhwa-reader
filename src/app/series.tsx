@@ -424,6 +424,7 @@ export default function SeriesDetail() {
         current={resumeIdx}
         count={rangeCount}
         onConfirm={confirmRange}
+        bookmarked={new Set([...marksByChapter.keys(), ...authorByChapter.keys(), ...communityByChapter.keys()])}
       />
     </View>
   );

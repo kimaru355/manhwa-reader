@@ -121,8 +121,8 @@ type DownloadsContext = {
   cancel: (seriesKey: string, chapterId: string) => void;
   cancelSeries: (seriesKey: string) => void;
   retry: (seriesKey: string, chapterId: string) => void;
-  /** Moves a title earlier (-1) or later (1) in the download order. */
-  moveSeries: (seriesKey: string, direction: -1 | 1) => void;
+  /** Moves a title earlier (-1) or later (1) in the download order, or to the front ('top'). */
+  moveSeries: (seriesKey: string, direction: -1 | 1 | 'top') => void;
   removeChapter: (seriesKey: string, chapterId: string) => void;
   /** Deletes several downloaded chapters of a title at once. */
   removeChapters: (seriesKey: string, chapterIds: string[]) => void;
@@ -483,13 +483,19 @@ export function DownloadsProvider({ children }: { children: ReactNode }) {
   );
 
   const moveSeries = useCallback(
-    (seriesKey: string, direction: -1 | 1) => {
+    (seriesKey: string, direction: -1 | 1 | 'top') => {
       updateQueue((q) => {
         const order = [...new Set(q.map((j) => j.series.key))];
         const from = order.indexOf(seriesKey);
-        const to = from + direction;
-        if (from < 0 || to < 0 || to >= order.length) return q;
-        [order[from], order[to]] = [order[to], order[from]];
+        if (direction === 'top') {
+          if (from <= 0) return q;
+          order.splice(from, 1);
+          order.unshift(seriesKey);
+        } else {
+          const to = from + direction;
+          if (from < 0 || to < 0 || to >= order.length) return q;
+          [order[from], order[to]] = [order[to], order[from]];
+        }
         // Chapters keep their order inside a title; titles follow the new order.
         return order.flatMap((k) => q.filter((j) => j.series.key === k));
       });
